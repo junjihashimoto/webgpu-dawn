@@ -1,0 +1,16 @@
+packages:
+  .
+  examples-package/
+
+-- Build with GLFW support by default
+package webgpu-dawn
+  flags: +glfw
+
+package webgpu-dawn-examples
+  flags: +glfw
+
+-- Uncomment to disable GLFW for compute-only builds
+-- package webgpu-dawn
+--   flags: -glfw
+-- package webgpu-dawn-examples
+--   flags: -glfw

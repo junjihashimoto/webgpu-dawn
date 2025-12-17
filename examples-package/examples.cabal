@@ -1,0 +1,57 @@
+cabal-version:      3.0
+name:               webgpu-dawn-examples
+version:            0.1.0.0
+synopsis:           Example applications for webgpu-dawn
+description:
+  Example applications demonstrating GPU computing and graphics
+  using the webgpu-dawn Haskell bindings.
+license:            MIT
+author:             Junji Hashimoto
+maintainer:         junji.hashimoto@gmail.com
+category:           Graphics, GPU
+build-type:         Simple
+
+flag glfw
+  description: Enable GLFW support for graphics examples
+  default:     True
+  manual:      True
+
+-- Compute examples
+executable hello-gpu
+  main-is:          HelloGPU.hs
+  hs-source-dirs:   ../examples
+  default-language: Haskell2010
+
+  build-depends:
+    base >= 4.14 && < 5,
+    webgpu-dawn,
+    vector >= 0.12
+
+  ghc-options: -Wall -threaded
+
+executable vector-add
+  main-is:          compute/VectorAdd.hs
+  hs-source-dirs:   ../examples
+  default-language: Haskell2010
+
+  build-depends:
+    base >= 4.14 && < 5,
+    webgpu-dawn,
+    vector >= 0.12
+
+  ghc-options: -Wall -threaded
+
+-- Graphics examples (require GLFW)
+executable triangle-gui
+  main-is:          TriangleGUI.hs
+  hs-source-dirs:   ../examples
+  default-language: Haskell2010
+
+  build-depends:
+    base >= 4.14 && < 5,
+    webgpu-dawn
+
+  ghc-options: -Wall -threaded
+
+  if flag(glfw)
+    cpp-options: -DENABLE_GLFW
