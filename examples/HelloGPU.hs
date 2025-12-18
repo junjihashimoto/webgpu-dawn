@@ -1,26 +1,27 @@
--- | Simple example demonstrating WebGPU Dawn usage
+-- | Simple example demonstrating WebGPU Dawn usage with ContT
 module Main where
 
-import Graphics.WebGPU.Dawn
+import Graphics.WebGPU.Dawn.ContT
 import qualified Data.Vector.Storable as V
 
 main :: IO ()
-main = do
-  putStrLn "Creating WebGPU context..."
+main = evalContT $ do
+  liftIO $ putStrLn "Creating WebGPU context..."
   ctx <- createContext
-  putStrLn "Context created successfully!"
+  liftIO $ putStrLn "Context created successfully!"
 
-  putStrLn "\nCreating a simple tensor..."
+  liftIO $ putStrLn "\nCreating a simple tensor..."
   let shape = Shape [4]
       input = V.fromList [1.0, 2.0, 3.0, 4.0 :: Float]
 
   tensor <- createTensorWithData ctx shape input
-  putStrLn "Tensor created!"
+  liftIO $ putStrLn "Tensor created!"
 
-  putStrLn "\nReading data back from GPU..."
-  output <- fromGPU ctx tensor 4 :: IO (V.Vector Float)
+  liftIO $ putStrLn "\nReading data back from GPU..."
+  output <- liftIO $ fromGPU ctx tensor 4 :: ContT r IO (V.Vector Float)
 
-  putStrLn $ "Input:  " ++ show input
-  putStrLn $ "Output: " ++ show output
+  liftIO $ putStrLn $ "Input:  " ++ show input
+  liftIO $ putStrLn $ "Output: " ++ show output
 
-  putStrLn "\nSuccess! WebGPU Dawn is working."
+  liftIO $ putStrLn "\nSuccess! WebGPU Dawn is working."
+  -- All resources automatically cleaned up here!

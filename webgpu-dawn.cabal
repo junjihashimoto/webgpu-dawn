@@ -42,12 +42,18 @@ library
     Graphics.WebGPU.Dawn.Context
     Graphics.WebGPU.Dawn.Tensor
     Graphics.WebGPU.Dawn.Kernel
-
-  if flag(glfw)
-    exposed-modules: Graphics.WebGPU.Dawn.GLFW
+    Graphics.WebGPU.Dawn.IO
+    Graphics.WebGPU.Dawn.ContT
 
   other-modules:
     Graphics.WebGPU.Dawn.Internal
+
+  if flag(glfw)
+    exposed-modules:
+      Graphics.WebGPU.Dawn.GLFW
+    other-modules:
+      Graphics.WebGPU.Dawn.GLFW.Internal
+      Graphics.WebGPU.Dawn.GLFW.ContT
 
   hs-source-dirs:   src
   default-language: Haskell2010
@@ -55,7 +61,8 @@ library
   build-depends:
     base >= 4.14 && < 5,
     bytestring >= 0.10 && < 0.13,
-    vector >= 0.12 && < 0.14
+    vector >= 0.12 && < 0.14,
+    transformers >= 0.5 && < 0.7
 
   c-sources:
     cbits/gpu_wrapper.c

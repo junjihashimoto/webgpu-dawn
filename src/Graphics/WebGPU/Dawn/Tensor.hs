@@ -12,7 +12,7 @@ module Graphics.WebGPU.Dawn.Tensor
   , TensorData(..)
   ) where
 
-import Control.Exception (throwIO, bracket)
+import Control.Exception (throwIO)
 import Foreign
 import Foreign.C.Types
 import Data.Vector.Storable (Vector)

@@ -9,47 +9,53 @@ This module provides high-level, type-safe Haskell bindings to Google's Dawn
 WebGPU implementation. It enables GPU computing and graphics programming from
 Haskell with automatic resource management.
 
-= Quick Start
+= Recommended Usage
 
-Here's a simple example of GPU-accelerated vector addition:
+For safe automatic resource management, use the ContT-based APIs:
+
+* For GPU compute: 'Graphics.WebGPU.Dawn.ContT'
+* For graphics with GLFW: 'Graphics.WebGPU.Dawn.GLFW'
+* For traditional bracket-style: 'Graphics.WebGPU.Dawn.IO'
+
+Both ContT and GLFW modules provide automatic resource cleanup.
+
+= Quick Start (ContT Style - Recommended)
 
 @
-import Graphics.WebGPU.Dawn
+import Graphics.WebGPU.Dawn.ContT
+import Control.Monad.Trans.Cont (evalContT)
 import qualified Data.Vector.Storable as V
 
 main :: IO ()
-main = withContext $ \\ctx -> do
-  -- Create input vectors
+main = evalContT $ do
+  ctx <- createContext
+
+  -- Create GPU tensors with automatic cleanup
   let a = V.fromList [1, 2, 3, 4] :: V.Vector Float
       b = V.fromList [5, 6, 7, 8] :: V.Vector Float
       shape = Shape [4]
 
-  -- Create GPU tensors
   tensorA <- createTensorWithData ctx shape a
   tensorB <- createTensorWithData ctx shape b
   tensorC <- createTensor ctx shape F32
 
   -- Compile and run kernel
-  let shader = unlines
-        [ "\@group(0) \@binding(0) var<storage, read> a: array<f32>;"
-        , "\@group(0) \@binding(1) var<storage, read> b: array<f32>;"
-        , "\@group(0) \@binding(2) var<storage, read_write> c: array<f32>;"
-        , ""
-        , "\@compute \@workgroup_size(256)"
-        , "fn main(\@builtin(global_invocation_id) gid: vec3<u32>) {"
-        , "  c[gid.x] = a[gid.x] + b[gid.x];"
-        , "}"
-        ]
-
-  code <- createKernelCode shader
-  kernel <- compileKernel ctx code [tensorA, tensorB, tensorC]
-                         (WorkgroupSize 1 1 1)
-  dispatchKernel ctx kernel
+  code <- createKernelCode shaderSource
+  kernel <- createKernel ctx code [tensorA, tensorB, tensorC]
+                        (WorkgroupSize 1 1 1)
+  liftIO $ dispatchKernel ctx kernel
 
   -- Read results
-  result <- fromGPU ctx tensorC 4
-  print result  -- [6.0, 8.0, 10.0, 12.0]
+  result <- liftIO $ fromGPU ctx tensorC 4
+  liftIO $ print result  -- [6.0, 8.0, 10.0, 12.0]
+  -- All resources automatically cleaned up here!
 @
+
+= Warning About Low-Level APIs
+
+This module exports low-level @create*@ and @destroy*@ functions for
+compatibility. Using these directly without proper cleanup can lead to
+resource leaks. Prefer the safe APIs mentioned above.
 -}
 
 module Graphics.WebGPU.Dawn

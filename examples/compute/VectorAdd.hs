@@ -1,19 +1,19 @@
 {-|
-Example: Vector Addition on GPU
+Example: Vector Addition on GPU with ContT
 
 This example demonstrates basic GPU compute by adding two vectors element-wise.
 It shows:
-- Creating GPU tensors
+- Creating GPU tensors with automatic cleanup
 - Uploading data to GPU
 - Compiling and running WGSL compute shaders
 - Reading results back to CPU
+- Automatic resource management with ContT
 -}
 
 module Main where
 
-import Graphics.WebGPU.Dawn
+import Graphics.WebGPU.Dawn.ContT
 import qualified Data.Vector.Storable as V
-import Text.Printf
 
 -- WGSL compute shader for vector addition
 vectorAddShader :: String
@@ -32,9 +32,9 @@ vectorAddShader = unlines
   ]
 
 main :: IO ()
-main = do
-  putStrLn "=== GPU Vector Addition Example ==="
-  putStrLn ""
+main = evalContT $ do
+  liftIO $ putStrLn "=== GPU Vector Addition Example ==="
+  liftIO $ putStrLn ""
 
   -- Create test vectors
   let n = 1024
@@ -42,51 +42,45 @@ main = do
       vecB = V.generate n (\i -> fromIntegral (n - i)) :: V.Vector Float
       shape = Shape [n]
 
-  putStrLn $ "Vector size: " ++ show n
-  putStrLn $ "First 5 elements of A: " ++ show (V.take 5 vecA)
-  putStrLn $ "First 5 elements of B: " ++ show (V.take 5 vecB)
-  putStrLn ""
+  liftIO $ putStrLn $ "Vector size: " ++ show n
+  liftIO $ putStrLn $ "First 5 elements of A: " ++ show (V.take 5 vecA)
+  liftIO $ putStrLn $ "First 5 elements of B: " ++ show (V.take 5 vecB)
+  liftIO $ putStrLn ""
 
-  -- Run on GPU
-  withContext $ \ctx -> do
-    putStrLn "Creating GPU tensors..."
-    tensorA <- createTensorWithData ctx shape vecA
-    tensorB <- createTensorWithData ctx shape vecB
-    tensorC <- createTensor ctx shape F32
+  -- Run on GPU with automatic resource management
+  ctx <- createContext
+  liftIO $ putStrLn "Creating GPU tensors..."
+  tensorA <- createTensorWithData ctx shape vecA
+  tensorB <- createTensorWithData ctx shape vecB
+  tensorC <- createTensor ctx shape F32
 
-    putStrLn "Compiling shader..."
-    code <- createKernelCode vectorAddShader
+  liftIO $ putStrLn "Compiling shader..."
+  code <- createKernelCode vectorAddShader
 
-    putStrLn "Creating kernel..."
-    let numWorkgroups = (n + 255) `div` 256  -- Ceiling division
-    kernel <- compileKernel ctx code [tensorA, tensorB, tensorC]
-                           (WorkgroupSize numWorkgroups 1 1)
+  liftIO $ putStrLn "Creating kernel..."
+  let numWorkgroups = (n + 255) `div` 256  -- Ceiling division
+  kernel <- createKernel ctx code [tensorA, tensorB, tensorC]
+                        (WorkgroupSize numWorkgroups 1 1)
 
-    putStrLn "Dispatching kernel..."
-    dispatchKernel ctx kernel
+  liftIO $ putStrLn "Dispatching kernel..."
+  liftIO $ dispatchKernel ctx kernel
 
-    putStrLn "Reading results from GPU..."
-    result <- fromGPU ctx tensorC n
+  liftIO $ putStrLn "Reading results from GPU..."
+  result <- liftIO $ fromGPU ctx tensorC n
 
-    putStrLn ""
-    putStrLn $ "First 5 elements of C: " ++ show (V.take 5 result)
-    putStrLn $ "Last 5 elements of C: " ++ show (V.drop (n - 5) result)
+  liftIO $ putStrLn ""
+  liftIO $ putStrLn $ "First 5 elements of C: " ++ show (V.take 5 result)
+  liftIO $ putStrLn $ "Last 5 elements of C: " ++ show (V.drop (n - 5) result)
 
-    -- Verify correctness
-    let expected = V.zipWith (+) vecA vecB
-        correct = result == expected
+  -- Verify correctness
+  let expected = V.zipWith (+) vecA vecB
+      correct = result == expected
 
-    putStrLn ""
-    if correct
-      then putStrLn "✓ Results correct!"
-      else putStrLn "✗ Results incorrect!"
+  liftIO $ putStrLn ""
+  if correct
+    then liftIO $ putStrLn "✓ Results correct!"
+    else liftIO $ putStrLn "✗ Results incorrect!"
 
-    -- Cleanup
-    destroyTensor tensorA
-    destroyTensor tensorB
-    destroyTensor tensorC
-    destroyKernel kernel
-    destroyKernelCode code
-
-  putStrLn ""
-  putStrLn "Example completed successfully."
+  -- All resources automatically cleaned up here!
+  liftIO $ putStrLn ""
+  liftIO $ putStrLn "Example completed successfully."

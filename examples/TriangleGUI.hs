@@ -1,15 +1,14 @@
 {-# LANGUAGE CPP #-}
 
--- | Simple triangle rendering example using WebGPU and GLFW
--- This follows the pattern from https://developer.chrome.com/docs/web-platform/webgpu/build-app
+-- | Triangle rendering example using ContT monad for resource management
+-- This demonstrates automatic resource cleanup using the continuation monad
 module Main where
 
 #ifdef ENABLE_GLFW
 
-import Graphics.WebGPU.Dawn
+import Graphics.WebGPU.Dawn.ContT
 import Graphics.WebGPU.Dawn.GLFW
 import Control.Monad (unless)
-import Control.Exception (bracket, bracket_)
 
 -- Shader code (WGSL) - renders a red triangle
 shaderCode :: String
@@ -27,71 +26,63 @@ shaderCode = unlines
   ]
 
 main :: IO ()
-main = do
-  putStrLn "Initializing WebGPU Triangle Demo..."
+main = evalContT $ do
+  liftIO $ putStrLn "Initializing WebGPU Triangle Demo..."
+  liftIO glfwInit
 
-  -- Initialize GLFW
-  glfwInit
+  -- Setup all resources using ContT for automatic cleanup
+  window <- createWindow 512 512 "WebGPU Triangle"
+  liftIO $ putStrLn "Window created"
 
-  -- Create window and setup WebGPU
-  bracket (createWindow 512 512 "WebGPU Triangle") destroyWindow $ \window -> do
-    putStrLn "Window created"
+  ctx <- createContext
+  liftIO $ putStrLn "WebGPU context created"
 
-    -- Create WebGPU context
-    ctx <- createContext
-    putStrLn "WebGPU context created"
+  surface <- createSurfaceForWindow ctx window
+  liftIO $ putStrLn "Surface created"
 
-    -- Create surface for the window
-    bracket (createSurfaceForWindow ctx window) destroySurface $ \surface -> do
-      putStrLn "Surface created"
+  -- Get preferred format and configure surface
+  format <- liftIO $ getSurfacePreferredFormat surface
+  liftIO $ putStrLn $ "Surface format: " ++ show format
+  liftIO $ configureSurface surface 512 512
+  liftIO $ putStrLn "Surface configured"
 
-      -- Get preferred format and configure surface
-      format <- getSurfacePreferredFormat surface
-      putStrLn $ "Surface format: " ++ show format
-      configureSurface surface 512 512
-      putStrLn "Surface configured"
+  shader <- createShaderModule ctx shaderCode
+  liftIO $ putStrLn "Shader compiled"
 
-      -- Create shader module
-      bracket (createShaderModule ctx shaderCode) releaseShaderModule $ \shader -> do
-        putStrLn "Shader compiled"
+  pipeline <- createRenderPipeline ctx shader format
+  liftIO $ putStrLn "Render pipeline created"
+  liftIO $ putStrLn "Starting render loop..."
 
-        -- Create render pipeline
-        bracket (createRenderPipeline ctx shader format) releaseRenderPipeline $ \pipeline -> do
-          putStrLn "Render pipeline created"
-          putStrLn "Starting render loop..."
-
-          -- Render loop
-          renderLoop ctx window surface pipeline
+  -- Render loop
+  liftIO $ renderLoop ctx window surface pipeline
 
   -- Clean up GLFW
-  glfwTerminate
-  putStrLn "Demo complete!"
+  liftIO glfwTerminate
+  liftIO $ putStrLn "Demo complete!"
 
--- Render loop
+-- Render loop demonstrates nested ContT
+-- Per-frame resources (texture, view, encoder, etc.) are created in inner scope
+-- and automatically released after each frame, while persistent resources
+-- (context, window, surface, pipeline) remain alive in outer scope
 renderLoop :: Context -> Window -> Surface -> RenderPipeline -> IO ()
 renderLoop ctx window surface pipeline = do
   shouldClose <- windowShouldClose window
   unless shouldClose $ do
-    -- Get current texture from surface
-    bracket (getCurrentTexture surface) releaseTexture $ \texture -> do
+    -- Inner scope: per-frame resources
+    evalContT $ do
+      texture <- createCurrentTexture surface
+      view <- createTextureView texture
+      encoder <- createCommandEncoder ctx
 
-      -- Create texture view
-      bracket (createTextureView texture) releaseTextureView $ \view -> do
+      pass <- createRenderPass encoder view
+      liftIO $ do
+        setRenderPipeline pass pipeline
+        draw pass 3  -- Draw 3 vertices (triangle)
+        endRenderPass pass
 
-        -- Create command encoder
-        bracket (createCommandEncoder ctx) releaseCommandEncoder $ \encoder -> do
-
-          -- Begin render pass
-          bracket (beginRenderPass encoder view) releaseRenderPassEncoder $ \pass -> do
-            -- Set pipeline and draw triangle
-            setRenderPipeline pass pipeline
-            draw pass 3  -- Draw 3 vertices (triangle)
-            endRenderPass pass
-
-          -- Finish encoding commands
-          bracket (finishEncoder encoder) releaseCommandBuffer $ \commands -> do
-            -- Submit commands to GPU
-            submitCommand ctx commands
+      commands <- createCommandBuffer encoder
+      liftIO $ submitCommand ctx commands
+    -- Per-frame resources automatically released here
 
     -- Present the frame
     surfacePresent surface

@@ -7,12 +7,11 @@ matching run.cpp case 12 exactly. Supports verification mode with small f32 matr
 
 module Main where
 
-import Graphics.WebGPU.Dawn
+import Graphics.WebGPU.Dawn.ContT
 import qualified Data.Vector.Storable as V
 import System.Clock (Clock(..), getTime, diffTimeSpec, toNanoSecs)
 import System.Environment (lookupEnv)
 import Text.Printf (printf)
-import Data.Maybe (fromMaybe)
 
 -- CPU reference implementation for matrix multiplication
 -- matA is (m, k), matB is (n, k) transposed (column-major)
@@ -115,10 +114,10 @@ main = do
     else runBenchmarkMode
 
 runVerificationMode :: IO ()
-runVerificationMode = do
-  putStrLn "=== Subgroup Matrix Multiplication (F32 Verification Mode) ==="
-  putStrLn "Testing with 128x128 matrices for CPU/GPU comparison"
-  putStrLn ""
+runVerificationMode = evalContT $ do
+  liftIO $ putStrLn "=== Subgroup Matrix Multiplication (F32 Verification Mode) ==="
+  liftIO $ putStrLn "Testing with 128x128 matrices for CPU/GPU comparison"
+  liftIO $ putStrLn ""
 
   -- Small matrices for verification
   let m = 128
@@ -129,9 +128,9 @@ runVerificationMode = do
       lid0 = 32
       lid1 = 2
 
-  putStrLn $ "Matrix dimensions: " ++ show m ++ "x" ++ show k ++ " * " ++ show n ++ "x" ++ show k
-  putStrLn $ "Tile configuration: TM=" ++ show tm ++ ", TN=" ++ show tn ++ ", LID0=" ++ show lid0 ++ ", LID1=" ++ show lid1
-  putStrLn ""
+  liftIO $ putStrLn $ "Matrix dimensions: " ++ show m ++ "x" ++ show k ++ " * " ++ show n ++ "x" ++ show k
+  liftIO $ putStrLn $ "Tile configuration: TM=" ++ show tm ++ ", TN=" ++ show tn ++ ", LID0=" ++ show lid0 ++ ", LID1=" ++ show lid1
+  liftIO $ putStrLn ""
 
   -- Initialize test data with simple values for easy verification
   let matA = V.generate (m * k) (\i -> fromIntegral (i `mod` 10) / 10.0) :: V.Vector Float
@@ -144,92 +143,87 @@ runVerificationMode = do
             col = i `mod` n  -- col in transposed (K, N) layout
         in matBOrig V.! (col * k + row)) :: V.Vector Float
 
-  putStrLn $ "Matrix A (M=" ++ show m ++ ", K=" ++ show k ++ ") row-major:"
-  putStrLn $ "  First 5: " ++ show (V.take 5 matA)
-  putStrLn $ "  A[0,0:5] = " ++ show (V.slice 0 5 matA)
-  putStrLn $ "Matrix B (N=" ++ show n ++ ", K=" ++ show k ++ ") transposed (column-major):"
-  putStrLn $ "  First 5: " ++ show (V.take 5 matB)
-  putStrLn $ "  B[0,0:5] = " ++ show (V.slice 0 5 matB)
-  putStrLn $ "  B is stored as (N,K) but represents transposed data"
-  putStrLn ""
+  liftIO $ putStrLn $ "Matrix A (M=" ++ show m ++ ", K=" ++ show k ++ ") row-major:"
+  liftIO $ putStrLn $ "  First 5: " ++ show (V.take 5 matA)
+  liftIO $ putStrLn $ "  A[0,0:5] = " ++ show (V.slice 0 5 matA)
+  liftIO $ putStrLn $ "Matrix B (N=" ++ show n ++ ", K=" ++ show k ++ ") transposed (column-major):"
+  liftIO $ putStrLn $ "  First 5: " ++ show (V.take 5 matB)
+  liftIO $ putStrLn $ "  B[0,0:5] = " ++ show (V.slice 0 5 matB)
+  liftIO $ putStrLn $ "  B is stored as (N,K) but represents transposed data"
+  liftIO $ putStrLn ""
 
   -- Compute CPU reference using original (non-transposed) B
-  putStrLn "Computing CPU reference..."
+  liftIO $ putStrLn "Computing CPU reference..."
   let cpuResult = cpuMatmul matA matBOrig m k n
-  putStrLn $ "CPU result (M=" ++ show m ++ ", N=" ++ show n ++ "):"
-  putStrLn $ "  First 5: " ++ show (V.take 5 cpuResult)
-  putStrLn $ "  C[0,0:5] = " ++ show (V.slice 0 5 cpuResult)
-  putStrLn ""
+  liftIO $ putStrLn $ "CPU result (M=" ++ show m ++ ", N=" ++ show n ++ "):"
+  liftIO $ putStrLn $ "  First 5: " ++ show (V.take 5 cpuResult)
+  liftIO $ putStrLn $ "  C[0,0:5] = " ++ show (V.slice 0 5 cpuResult)
+  liftIO $ putStrLn ""
 
-  putStrLn "Creating context with subgroup features..."
-  withContextFeatures
+  liftIO $ putStrLn "Creating context with subgroup features..."
+  ctx <- createContextWithFeatures
     ["allow_unsafe_apis"]
     [FeatureShaderF16, FeatureSubgroups, FeatureChromiumExperimentalSubgroupMatrix]
-    $ \ctx -> do
-      putStrLn "✓ Context created with subgroup features"
+  liftIO $ putStrLn "✓ Context created with subgroup features"
 
-      putStrLn "Creating GPU tensors..."
-      tensorA <- createTensorWithData ctx (Shape [m * k]) matA
-      tensorB <- createTensorWithData ctx (Shape [n * k]) matB
-      tensorC <- createTensor ctx (Shape [m * n]) F32
-      putStrLn "✓ Tensors created"
+  liftIO $ putStrLn "Creating GPU tensors..."
+  tensorA <- createTensorWithData ctx (Shape [m * k]) matA
+  tensorB <- createTensorWithData ctx (Shape [n * k]) matB
+  tensorC <- createTensor ctx (Shape [m * n]) F32
+  liftIO $ putStrLn "✓ Tensors created"
 
-      putStrLn "Compiling subgroup shader (F32)..."
-      let shaderCode = subgroupMatmulShader "f32" m k n tm tn lid0 lid1
-      code <- createKernelCode shaderCode
-      putStrLn "✓ Shader compiled"
+  liftIO $ putStrLn "Compiling subgroup shader (F32)..."
+  let shaderCode = subgroupMatmulShader "f32" m k n tm tn lid0 lid1
+  code <- createKernelCode shaderCode
+  liftIO $ putStrLn "✓ Shader compiled"
 
-      let numWorkgroupsX = (m + 8 * tm - 1) `div` (8 * tm)
-          numWorkgroupsY = (n + 8 * tn * lid1 - 1) `div` (8 * tn * lid1)
+  let numWorkgroupsX = (m + 8 * tm - 1) `div` (8 * tm)
+      numWorkgroupsY = (n + 8 * tn * lid1 - 1) `div` (8 * tn * lid1)
 
-      putStrLn $ "Number of workgroups: (" ++ show numWorkgroupsX ++ ", " ++ show numWorkgroupsY ++ ", 1)"
-      kernel <- compileKernel ctx code [tensorA, tensorB, tensorC]
-                (WorkgroupSize numWorkgroupsX numWorkgroupsY 1)
-      putStrLn "✓ Kernel compiled"
+  liftIO $ putStrLn $ "Number of workgroups: (" ++ show numWorkgroupsX ++ ", " ++ show numWorkgroupsY ++ ", 1)"
+  kernel <- createKernel ctx code [tensorA, tensorB, tensorC]
+            (WorkgroupSize numWorkgroupsX numWorkgroupsY 1)
+  liftIO $ putStrLn "✓ Kernel compiled"
 
-      putStrLn "Dispatching kernel..."
-      dispatchKernel ctx kernel
-      putStrLn "✓ Kernel completed"
+  liftIO $ putStrLn "Dispatching kernel..."
+  liftIO $ dispatchKernel ctx kernel
+  liftIO $ putStrLn "✓ Kernel completed"
 
-      putStrLn "Reading GPU results..."
-      gpuResult <- fromGPU ctx tensorC (m * n) :: IO (V.Vector Float)
-      putStrLn $ "GPU result (M=" ++ show m ++ ", N=" ++ show n ++ "):"
-      putStrLn $ "  First 5: " ++ show (V.take 5 gpuResult)
-      putStrLn $ "  C[0,0:5] = " ++ show (V.slice 0 5 gpuResult)
-      putStrLn ""
+  liftIO $ putStrLn "Reading GPU results..."
+  gpuResult <- liftIO $ fromGPU ctx tensorC (m * n) :: ContT r IO (V.Vector Float)
+  liftIO $ putStrLn $ "GPU result (M=" ++ show m ++ ", N=" ++ show n ++ "):"
+  liftIO $ putStrLn $ "  First 5: " ++ show (V.take 5 gpuResult)
+  liftIO $ putStrLn $ "  C[0,0:5] = " ++ show (V.slice 0 5 gpuResult)
+  liftIO $ putStrLn ""
 
-      -- Manual check of first element
-      let a00 = V.slice 0 k matA  -- First row of A
-          b00 = V.slice 0 k matBOrig  -- First row of original B
-          dotProduct = V.sum $ V.zipWith (*) a00 b00
-      putStrLn $ "Manual verification of C[0,0]:"
-      putStrLn $ "  A[0,:] dot BOrig[0,:] = " ++ show dotProduct
-      putStrLn $ "  CPU result C[0,0] = " ++ show (cpuResult V.! 0)
-      putStrLn $ "  GPU result C[0,0] = " ++ show (gpuResult V.! 0)
-      putStrLn ""
+  -- Manual check of first element
+  let a00 = V.slice 0 k matA  -- First row of A
+      b00 = V.slice 0 k matBOrig  -- First row of original B
+      dotProduct = V.sum $ V.zipWith (*) a00 b00
+  liftIO $ putStrLn $ "Manual verification of C[0,0]:"
+  liftIO $ putStrLn $ "  A[0,:] dot BOrig[0,:] = " ++ show dotProduct
+  liftIO $ putStrLn $ "  CPU result C[0,0] = " ++ show (cpuResult V.! 0)
+  liftIO $ putStrLn $ "  GPU result C[0,0] = " ++ show (gpuResult V.! 0)
+  liftIO $ putStrLn ""
 
-      -- Compare results
-      let tolerance = 1e-3  -- Allow small floating point differences
-          (match, maxIdx, maxDiff, gpuVal) = isClose cpuResult gpuResult tolerance
+  -- Compare results
+  let tolerance = 1e-3  -- Allow small floating point differences
+      (match, maxIdx, maxDiff, gpuVal) = isClose cpuResult gpuResult tolerance
 
-      if match
-        then putStrLn "✓ VERIFICATION PASSED: CPU and GPU results match!"
-        else do
-          putStrLn "✗ VERIFICATION FAILED: CPU and GPU results differ!"
-          printf "  Maximum difference: %.6f at index %d\n" maxDiff maxIdx
-          printf "  CPU value: %.6f, GPU value: %.6f\n" (cpuResult V.! maxIdx) gpuVal
+  liftIO $ if match
+    then putStrLn "✓ VERIFICATION PASSED: CPU and GPU results match!"
+    else do
+      putStrLn "✗ VERIFICATION FAILED: CPU and GPU results differ!"
+      printf "  Maximum difference: %.6f at index %d\n" maxDiff maxIdx
+      printf "  CPU value: %.6f, GPU value: %.6f\n" (cpuResult V.! maxIdx) gpuVal
 
-      destroyTensor tensorA
-      destroyTensor tensorB
-      destroyTensor tensorC
-      destroyKernel kernel
-      destroyKernelCode code
+  -- Resources automatically cleaned up by ContT!
 
 runBenchmarkMode :: IO ()
-runBenchmarkMode = do
-  putStrLn "=== Subgroup Matrix Multiplication (F16 Benchmark Mode) ==="
-  putStrLn "Testing chromium_experimental_subgroup_matrix - Case 12 from run.cpp"
-  putStrLn ""
+runBenchmarkMode = evalContT $ do
+  liftIO $ putStrLn "=== Subgroup Matrix Multiplication (F16 Benchmark Mode) ==="
+  liftIO $ putStrLn "Testing chromium_experimental_subgroup_matrix - Case 12 from run.cpp"
+  liftIO $ putStrLn ""
 
   -- Matching run.cpp case 12 exactly
   let m = 4096
@@ -241,88 +235,82 @@ runBenchmarkMode = do
       lid1 = 2
       nIter = 30
 
-  putStrLn $ "Matrix dimensions: " ++ show m ++ "x" ++ show k ++ " * " ++ show n ++ "x" ++ show k
-  putStrLn $ "Tile configuration: TM=" ++ show tm ++ ", TN=" ++ show tn ++ ", LID0=" ++ show lid0 ++ ", LID1=" ++ show lid1
-  putStrLn ""
+  liftIO $ putStrLn $ "Matrix dimensions: " ++ show m ++ "x" ++ show k ++ " * " ++ show n ++ "x" ++ show k
+  liftIO $ putStrLn $ "Tile configuration: TM=" ++ show tm ++ ", TN=" ++ show tn ++ ", LID0=" ++ show lid0 ++ ", LID1=" ++ show lid1
+  liftIO $ putStrLn ""
 
   -- Initialize test data
   let matA = V.generate (m * k) (\i -> fromIntegral (i `mod` 10)) :: V.Vector Float
       matB = V.generate (n * k) (\i -> fromIntegral (i `mod` 10)) :: V.Vector Float
 
-  putStrLn $ "Matrix A: first 5: " ++ show (V.take 5 matA)
-  putStrLn $ "Matrix B: first 5: " ++ show (V.take 5 matB)
-  putStrLn ""
+  liftIO $ putStrLn $ "Matrix A: first 5: " ++ show (V.take 5 matA)
+  liftIO $ putStrLn $ "Matrix B: first 5: " ++ show (V.take 5 matB)
+  liftIO $ putStrLn ""
 
-  putStrLn "Creating context with subgroup features..."
-  withContextFeatures
+  liftIO $ putStrLn "Creating context with subgroup features..."
+  ctx <- createContextWithFeatures
     ["allow_unsafe_apis"]
     [FeatureShaderF16, FeatureSubgroups, FeatureChromiumExperimentalSubgroupMatrix]
-    $ \ctx -> do
-      putStrLn "✓ Context created with subgroup features"
+  liftIO $ putStrLn "✓ Context created with subgroup features"
 
-      putStrLn "Creating GPU tensors..."
-      tensorA <- createTensorWithData ctx (Shape [m * k]) matA
-      tensorB <- createTensorWithData ctx (Shape [n * k]) matB
-      tensorC <- createTensor ctx (Shape [m * n]) F32
-      putStrLn "✓ Tensors created"
+  liftIO $ putStrLn "Creating GPU tensors..."
+  tensorA <- createTensorWithData ctx (Shape [m * k]) matA
+  tensorB <- createTensorWithData ctx (Shape [n * k]) matB
+  tensorC <- createTensor ctx (Shape [m * n]) F32
+  liftIO $ putStrLn "✓ Tensors created"
 
-      putStrLn "Compiling subgroup shader with loop unrolling..."
-      let shaderCode = subgroupMatmulShader "f16" m k n tm tn lid0 lid1
-      code <- createKernelCode shaderCode
-      putStrLn "✓ Shader compiled"
+  liftIO $ putStrLn "Compiling subgroup shader with loop unrolling..."
+  let shaderCode = subgroupMatmulShader "f16" m k n tm tn lid0 lid1
+  code <- createKernelCode shaderCode
+  liftIO $ putStrLn "✓ Shader compiled"
 
-      let numWorkgroupsX = (m + 8 * tm - 1) `div` (8 * tm)
-          numWorkgroupsY = (n + 8 * tn * lid1 - 1) `div` (8 * tn * lid1)
+  let numWorkgroupsX = (m + 8 * tm - 1) `div` (8 * tm)
+      numWorkgroupsY = (n + 8 * tn * lid1 - 1) `div` (8 * tn * lid1)
 
-      putStrLn $ "Workgroup size: (" ++ show lid0 ++ ", " ++ show lid1 ++ ", 1)"
-      putStrLn $ "Number of workgroups: (" ++ show numWorkgroupsX ++ ", " ++ show numWorkgroupsY ++ ", 1)"
-      kernel <- compileKernel ctx code [tensorA, tensorB, tensorC]
-                (WorkgroupSize numWorkgroupsX numWorkgroupsY 1)
-      putStrLn "✓ Kernel compiled"
+  liftIO $ putStrLn $ "Workgroup size: (" ++ show lid0 ++ ", " ++ show lid1 ++ ", 1)"
+  liftIO $ putStrLn $ "Number of workgroups: (" ++ show numWorkgroupsX ++ ", " ++ show numWorkgroupsY ++ ", 1)"
+  kernel <- createKernel ctx code [tensorA, tensorB, tensorC]
+            (WorkgroupSize numWorkgroupsX numWorkgroupsY 1)
+  liftIO $ putStrLn "✓ Kernel compiled"
 
-      putStrLn $ "Dispatching kernel " ++ show nIter ++ " times..."
+  liftIO $ putStrLn $ "Dispatching kernel " ++ show nIter ++ " times..."
 
-      -- Run nIter times and collect timings
-      times <- sequence $ replicate nIter $ do
-        startTime <- getTime Monotonic
-        dispatchKernel ctx kernel
-        endTime <- getTime Monotonic
-        let elapsed = diffTimeSpec startTime endTime
-            elapsedNs = toNanoSecs elapsed
-        return $ fromIntegral elapsedNs / 1.0e9 :: IO Double
+  -- Run nIter times and collect timings
+  times <- liftIO $ sequence $ replicate nIter $ do
+    startTime <- getTime Monotonic
+    dispatchKernel ctx kernel
+    endTime <- getTime Monotonic
+    let elapsed = diffTimeSpec startTime endTime
+        elapsedNs = toNanoSecs elapsed
+    return $ fromIntegral elapsedNs / 1.0e9 :: IO Double
 
-      putStrLn $ "✓ All " ++ show nIter ++ " runs completed"
+  liftIO $ putStrLn $ "✓ All " ++ show nIter ++ " runs completed"
 
-      -- Calculate statistics
-      let totalOps = 2 * fromIntegral (m * n * k) :: Double
-          avgTime = sum times / fromIntegral nIter
-          minTime = minimum times
-          maxTime = maximum times
-          avgGflops = (totalOps / avgTime) / 1.0e9
-          minGflops = (totalOps / maxTime) / 1.0e9
-          maxGflops = (totalOps / minTime) / 1.0e9
+  -- Calculate statistics
+  let totalOps = 2 * fromIntegral (m * n * k) :: Double
+      avgTime = sum times / fromIntegral nIter
+      minTime = minimum times
+      maxTime = maximum times
+      avgGflops = (totalOps / avgTime) / 1.0e9
+      minGflops = (totalOps / maxTime) / 1.0e9
+      maxGflops = (totalOps / minTime) / 1.0e9
 
-      putStrLn ""
-      putStrLn "===================================================================="
-      printf "Execution Time: (M = %d, K = %d, N = %d) x %d iterations\n" m k n nIter
-      printf "%.1f milliseconds / dispatch ~ %.2f GFLOPS\n" (avgTime * 1000) avgGflops
-      putStrLn "===================================================================="
-      putStrLn ""
-      printf "Average execution time: %.4f ms\n" (avgTime * 1000)
-      printf "Min execution time: %.4f ms (%.2f GFLOPS)\n" (minTime * 1000) maxGflops
-      printf "Max execution time: %.4f ms (%.2f GFLOPS)\n" (maxTime * 1000) minGflops
-      putStrLn ""
+  liftIO $ putStrLn ""
+  liftIO $ putStrLn "===================================================================="
+  liftIO $ printf "Execution Time: (M = %d, K = %d, N = %d) x %d iterations\n" m k n nIter
+  liftIO $ printf "%.1f milliseconds / dispatch ~ %.2f GFLOPS\n" (avgTime * 1000) avgGflops
+  liftIO $ putStrLn "===================================================================="
+  liftIO $ putStrLn ""
+  liftIO $ printf "Average execution time: %.4f ms\n" (avgTime * 1000)
+  liftIO $ printf "Min execution time: %.4f ms (%.2f GFLOPS)\n" (minTime * 1000) maxGflops
+  liftIO $ printf "Max execution time: %.4f ms (%.2f GFLOPS)\n" (maxTime * 1000) minGflops
+  liftIO $ putStrLn ""
 
-      putStrLn "Reading results..."
-      result <- fromGPU ctx tensorC (m * n) :: IO (V.Vector Float)
-      putStrLn $ "Result: first 5: " ++ show (V.take 5 result)
-      putStrLn $ "Result: last 5: " ++ show (V.drop (m * n - 5) result)
+  liftIO $ putStrLn "Reading results..."
+  result <- liftIO $ fromGPU ctx tensorC (m * n) :: ContT r IO (V.Vector Float)
+  liftIO $ putStrLn $ "Result: first 5: " ++ show (V.take 5 result)
+  liftIO $ putStrLn $ "Result: last 5: " ++ show (V.drop (m * n - 5) result)
 
-      destroyTensor tensorA
-      destroyTensor tensorB
-      destroyTensor tensorC
-      destroyKernel kernel
-      destroyKernelCode code
-
-      putStrLn ""
-      putStrLn "✓ Subgroup matmul completed successfully on GPU!"
+  -- Resources automatically cleaned up by ContT!
+  liftIO $ putStrLn ""
+  liftIO $ putStrLn "✓ Subgroup matmul completed successfully on GPU!"
