@@ -56,8 +56,11 @@ module Graphics.WebGPU.Dawn
   ( -- * Context Management
     Context
   , withContext
+  , withContextFeatures
   , createContext
+  , createContextWithFeatures
   , destroyContext
+  , WGPUFeatureName(..)
 
     -- * Tensor Operations
   , Tensor

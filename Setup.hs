@@ -108,7 +108,7 @@ getDawnVersion :: IO String
 getDawnVersion = do
   mVersion <- lookupEnv "DAWN_VERSION"
   case mVersion of
-    Nothing -> return "e1d6e12337080cf9f6d8726209e86df449bc6e9a"  -- Known working commit
+    Nothing -> return "3f79f3aefe0b0a498002564fcfb13eb21ab6c047"  -- Known working commit
     Just other -> return other
 
 getGpuCppVersion :: IO String

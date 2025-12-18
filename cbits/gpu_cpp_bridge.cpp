@@ -92,6 +92,82 @@ GPUContext gpu_create_context(GPUError* error) {
     }
 }
 
+// Create context with device features and toggles
+GPUContext gpu_create_context_with_features(
+    const char** enabledToggles, size_t toggleCount,
+    const uint32_t* requiredFeatures, size_t featureCount,
+    GPUError* error) {
+    try {
+        CLEAR_ERROR(error);
+        LOG("Creating context with " << toggleCount << " toggles and " << featureCount << " features");
+
+        // Setup Dawn toggles
+        WGPUDawnTogglesDescriptor toggles = {};
+        toggles.chain.sType = WGPUSType_DawnTogglesDescriptor;
+        toggles.enabledToggles = enabledToggles;
+        toggles.enabledToggleCount = toggleCount;
+
+        // Setup device descriptor with features
+        WGPUDeviceDescriptor devDesc = {};
+        devDesc.nextInChain = &toggles.chain;
+        devDesc.requiredFeatureCount = featureCount;
+
+        // Convert uint32_t features to WGPUFeatureName
+        std::vector<WGPUFeatureName> features(featureCount);
+        for (size_t i = 0; i < featureCount; ++i) {
+            features[i] = static_cast<WGPUFeatureName>(requiredFeatures[i]);
+            LOG("  Requesting feature: " << features[i]);
+        }
+        devDesc.requiredFeatures = features.data();
+
+        // Error callback
+        devDesc.uncapturedErrorCallbackInfo = WGPUUncapturedErrorCallbackInfo {
+            .callback = [](WGPUDevice const * device, WGPUErrorType type, WGPUStringView msg, void*, void*) {
+                LOG("[Uncaptured " << (int)type << "] " << std::string(msg.data, msg.length));
+            }
+        };
+
+        // Device lost callback
+        devDesc.deviceLostCallbackInfo = WGPUDeviceLostCallbackInfo {
+            .mode = WGPUCallbackMode_AllowSpontaneous,
+            .callback = [](WGPUDevice const * device, WGPUDeviceLostReason reason, WGPUStringView msg, void*, void*) {
+                LOG("[DeviceLost " << (int)reason << "] " << std::string(msg.data, msg.length));
+            }
+        };
+
+        // Create context with custom device descriptor
+        LOG("Calling gpu::createContext with device descriptor...");
+        auto ctx = new GPUContextImpl();
+        ctx->ctx = new gpu::Context(gpu::createContext({}, {}, devDesc));
+
+        // Setup logging callback
+        WGPULoggingCallbackInfo logCb{
+            .callback = [](WGPULoggingType type, WGPUStringView msg, void*, void*) {
+                LOG("[WGPU " << (int)type << "] " << std::string(msg.data, msg.length));
+            }
+        };
+        wgpuDeviceSetLoggingCallback(ctx->ctx->device, logCb);
+
+        // Log available features on the device
+        LOG("Device created. Checking supported features...");
+        WGPUSupportedFeatures supportedFeatures = {};
+        wgpuDeviceGetFeatures(ctx->ctx->device, &supportedFeatures);
+        LOG("Device supports " << supportedFeatures.featureCount << " features");
+        if (supportedFeatures.featureCount > 0 && supportedFeatures.features != nullptr) {
+            LOG("Supported features:");
+            for (size_t i = 0; i < supportedFeatures.featureCount; ++i) {
+                LOG("  Feature " << i << ": " << supportedFeatures.features[i]);
+            }
+        }
+
+        LOG("Context created successfully with features");
+        return static_cast<GPUContext>(ctx);
+    } catch (const std::exception& e) {
+        SET_ERROR(error, 1, e.what());
+        return nullptr;
+    }
+}
+
 void gpu_destroy_context(GPUContext ctx) {
     if (ctx) {
         auto impl = static_cast<GPUContextImpl*>(ctx);

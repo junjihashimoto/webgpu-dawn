@@ -39,6 +39,10 @@ typedef struct {
 
 // Context management
 GPUContext gpu_create_context(GPUError* error);
+GPUContext gpu_create_context_with_features(
+    const char** enabledToggles, size_t toggleCount,
+    const uint32_t* requiredFeatures, size_t featureCount,
+    GPUError* error);
 void gpu_destroy_context(GPUContext ctx);
 
 // Shape management

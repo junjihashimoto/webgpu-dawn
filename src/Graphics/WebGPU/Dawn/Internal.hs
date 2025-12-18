@@ -7,6 +7,7 @@ module Graphics.WebGPU.Dawn.Internal where
 import Foreign
 import Foreign.C.Types
 import Foreign.C.String
+import Data.Word (Word32)
 
 -- Opaque types corresponding to C wrapper
 data Context_
@@ -62,6 +63,9 @@ numTypeToCInt = fromIntegral . fromEnum
 -- Context management
 foreign import ccall unsafe "gpu_create_context"
   c_createContext :: Ptr GPUError -> IO Context
+
+foreign import ccall unsafe "gpu_create_context_with_features"
+  c_createContextWithFeatures :: Ptr CString -> CSize -> Ptr Word32 -> CSize -> Ptr GPUError -> IO Context
 
 foreign import ccall unsafe "gpu_destroy_context"
   c_destroyContext :: Context -> IO ()
