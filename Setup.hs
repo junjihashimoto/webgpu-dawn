@@ -111,13 +111,6 @@ getDawnVersion = do
     Nothing -> return "3f79f3aefe0b0a498002564fcfb13eb21ab6c047"  -- Known working commit
     Just other -> return other
 
-getGpuCppVersion :: IO String
-getGpuCppVersion = do
-  mVersion <- lookupEnv "GPU_CPP_VERSION"
-  case mVersion of
-    Nothing -> return "dev"  -- Use dev branch
-    Just other -> return other
-
 getLocalUserDawnDir :: IO FilePath
 getLocalUserDawnDir = do
   mHome <- lookupEnv "DAWN_HOME"
@@ -261,71 +254,6 @@ buildDawnTo dest glfwEnabled = do
   callProcess "cmake" ["--install", dawnBuild, "--config", "Release"]
 
   putStrLn "Dawn built successfully."
-
--- GPU.cpp setup functions
-getLocalUserGpuCppDir :: IO FilePath
-getLocalUserGpuCppDir = do
-  mHome <- lookupEnv "GPU_CPP_HOME"
-  gpuCppVersion <- getGpuCppVersion
-  base <- case mHome of
-    Just h  -> pure h
-    Nothing -> do
-      cache <- getXdgDirectory XdgCache "gpu-cpp"
-      pure cache
-  pure $ base </> gpuCppVersion
-
-ensureGpuCpp :: IO FilePath
-ensureGpuCpp = do
-  skip <- lookupEnv "GPU_CPP_SKIP_DOWNLOAD"
-  case skip of
-    Just _ -> do
-      putStrLn "GPU_CPP_SKIP_DOWNLOAD set; assuming gpu.cpp exists globally."
-      return "."
-    Nothing -> do
-      dest <- getLocalUserGpuCppDir
-      let marker = dest </> ".ok"
-      exists <- doesFileExist marker
-      present <- doesDirectoryExist dest
-      if present && exists
-        then pure dest
-        else do
-          putStrLn $ "Cloning gpu.cpp to " <> dest
-          cloneGpuCpp dest
-          writeFile marker ""
-          pure dest
-
-cloneGpuCpp :: FilePath -> IO ()
-cloneGpuCpp dest = do
-  createDirectoryIfMissing True dest
-
-  gpuCppVersion <- getGpuCppVersion
-
-  putStrLn "Cloning gpu.cpp repository..."
-
-  -- Initialize git repo
-  callProcess "git" ["init", dest]
-
-  -- Check if origin exists
-  (_, _, _, ph) <- createProcess (proc "git" ["remote", "get-url", "origin"])
-    { cwd = Just dest
-    , std_out = CreatePipe
-    , std_err = CreatePipe
-    }
-  exitCode <- waitForProcess ph
-
-  case exitCode of
-    ExitSuccess ->
-      callProcess "git" ["-C", dest, "remote", "set-url", "origin", "https://github.com/AnswerDotAI/gpu.cpp"]
-    ExitFailure _ ->
-      callProcess "git" ["-C", dest, "remote", "add", "origin", "https://github.com/AnswerDotAI/gpu.cpp"]
-
-  -- Fetch and checkout
-  putStrLn $ "Fetching gpu.cpp version: " ++ gpuCppVersion
-  callProcess "git" ["-C", dest, "fetch", "origin", gpuCppVersion]
-  callProcess "git" ["-C", dest, "checkout", gpuCppVersion]
-  callProcess "git" ["-C", dest, "reset", "--hard", "origin/" ++ gpuCppVersion]
-
-  putStrLn "gpu.cpp cloned successfully."
 
 replaceAll :: String -> String -> String -> String
 replaceAll str from to =
