@@ -37,12 +37,12 @@ withContextFeatures toggles features =
   bracket (C.createContextWithFeatures toggles features) C.destroyContext
 
 -- | Create a tensor with automatic cleanup
-withTensor :: Context -> Shape -> NumType -> (Tensor -> IO a) -> IO a
+withTensor :: Context -> Shape -> NumType -> (Tensor dtype -> IO a) -> IO a
 withTensor ctx shape dtype =
   bracket (T.createTensor ctx shape dtype) T.destroyTensor
 
 -- | Create a tensor with data and automatic cleanup
-withTensorWithData :: TensorData a => Context -> Shape -> Vector a -> (Tensor -> IO b) -> IO b
+withTensorWithData :: TensorData a => Context -> Shape -> Vector a -> (Tensor dtype -> IO b) -> IO b
 withTensorWithData ctx shape vec =
   bracket (T.createTensorWithData ctx shape vec) T.destroyTensor
 
@@ -52,6 +52,6 @@ withKernelCode wgslSource =
   bracket (K.createKernelCode wgslSource) K.destroyKernelCode
 
 -- | Compile a kernel with automatic cleanup
-withKernel :: Context -> KernelCode -> [Tensor] -> WorkgroupSize -> (Kernel -> IO a) -> IO a
+withKernel :: Context -> KernelCode -> [Tensor dtype] -> WorkgroupSize -> (Kernel -> IO a) -> IO a
 withKernel ctx code tensors wgSize =
   bracket (K.compileKernel ctx code tensors wgSize) K.destroyKernel

@@ -20,6 +20,7 @@ module Graphics.WebGPU.Dawn.GLFW.Internal
   , destroyWindow
   , windowShouldClose
   , pollEvents
+  , windowGetKey
 
     -- * Surface Management
   , Surface
@@ -117,6 +118,9 @@ foreign import ccall "gpu_window_should_close"
 
 foreign import ccall "gpu_poll_events"
   c_gpu_poll_events :: IO ()
+
+foreign import ccall "gpu_window_get_key"
+  c_gpu_window_get_key :: Ptr () -> CInt -> IO CInt
 
 foreign import ccall "gpu_create_surface_for_window"
   c_gpu_create_surface_for_window :: Ptr () -> Ptr () -> Ptr I.GPUError -> IO (Ptr ())
@@ -225,6 +229,12 @@ windowShouldClose (Window win) = do
 -- | Poll for window events (must be called regularly in the render loop)
 pollEvents :: IO ()
 pollEvents = c_gpu_poll_events
+
+-- | Get key state (GLFW_PRESS/RELEASE/REPEAT) for a specific key
+windowGetKey :: Window -> Int -> IO Int
+windowGetKey (Window win) key = do
+  result <- c_gpu_window_get_key win (fromIntegral key)
+  return $ fromIntegral result
 
 -- | Create a WebGPU surface for the given window
 createSurfaceForWindow :: Context -> Window -> IO Surface

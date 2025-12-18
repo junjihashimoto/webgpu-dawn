@@ -6,3 +6,7 @@ cabal.project.local~
 *~
 .ghc.environment.*
 .claude/
+*.bak
+*.hi
+*.o
+gemma.hs/

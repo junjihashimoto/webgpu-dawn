@@ -22,7 +22,7 @@ cabal update
 cabal install webgpu-dawn
 ```
 
-The first build will download and compile Dawn (~10-15 minutes). Subsequent builds are fast.
+**Installation is fast!** Pre-built Dawn binaries are automatically downloaded from GitHub releases (~30 seconds). If the cache is unavailable, Dawn will be built from source (~10-15 minutes on first build).
 
 ### Simple Example
 
@@ -143,12 +143,40 @@ data WorkgroupSize = WorkgroupSize { workgroupX, workgroupY, workgroupZ :: Int }
 
 ## Configuration
 
+### Binary Cache
+
+Dawn binaries are automatically downloaded from GitHub releases for faster installation:
+
+1. **Automatic download**: Setup.hs first tries to download pre-built binaries
+2. **Checksum verification**: SHA256 checksums ensure integrity
+3. **Fallback to source**: If download fails, builds from source automatically
+
+To upload your own Dawn cache (for CI or custom builds):
+
+```bash
+./scripts/upload-dawn-cache.sh v0.1.0
+```
+
 ### Environment Variables
 
 - `DAWN_HOME`: Custom installation directory (default: `~/.cache/dawn`)
 - `DAWN_VERSION`: Specific Dawn commit to use (default: tested commit)
-- `DAWN_SKIP_BUILD`: Skip building Dawn (assumes system installation)
-- `DAWN_USE_GIT`: Set to `1` to use git clone instead of tarball download (default: tarball download, no git required)
+- `DAWN_SKIP_BUILD`: Skip building Dawn entirely (assumes system installation)
+- `DAWN_BUILD_FROM_SOURCE`: Set to `1` to force building from source, skip cache download
+- `DAWN_USE_GIT`: Set to `1` to use git clone instead of tarball download when building from source (default: tarball download, no git required)
+
+**Installation modes:**
+
+```bash
+# Default: Try cache download, fallback to source build if unavailable
+cabal install webgpu-dawn
+
+# Force build from source (skip cache):
+DAWN_BUILD_FROM_SOURCE=1 cabal install webgpu-dawn
+
+# Use system-installed Dawn:
+DAWN_SKIP_BUILD=1 cabal install webgpu-dawn
+```
 
 ### Platform Support
 

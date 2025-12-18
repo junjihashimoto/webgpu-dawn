@@ -20,15 +20,17 @@ typedef enum {
     GPU_F16 = 0,
     GPU_F32 = 1,
     GPU_F64 = 2,
-    GPU_I8  = 3,
-    GPU_I16 = 4,
-    GPU_I32 = 5,
-    GPU_I64 = 6,
-    GPU_U8  = 7,
-    GPU_U16 = 8,
-    GPU_U32 = 9,
-    GPU_U64 = 10,
-    GPU_UNKNOWN = 11
+    GPU_I4  = 3,   // 4-bit signed (packed: 8 nibbles per u32)
+    GPU_I8  = 4,
+    GPU_I16 = 5,
+    GPU_I32 = 6,
+    GPU_I64 = 7,
+    GPU_U4  = 8,   // 4-bit unsigned (packed: 8 nibbles per u32)
+    GPU_U8  = 9,
+    GPU_U16 = 10,
+    GPU_U32 = 11,
+    GPU_U64 = 12,
+    GPU_UNKNOWN = 13
 } GPUNumType;
 
 // Error handling
@@ -73,13 +75,29 @@ void gpu_destroy_kernel_code(GPUKernelCode code);
 GPUKernel gpu_create_kernel(GPUContext ctx, GPUKernelCode code,
                             GPUTensor* tensors, size_t num_tensors,
                             size_t num_workgroups_x, size_t num_workgroups_y, size_t num_workgroups_z,
+                            const char* cache_key,  // Optional cache key for shader caching
                             GPUError* error);
 void gpu_destroy_kernel(GPUKernel kernel);
 void gpu_dispatch_kernel(GPUContext ctx, GPUKernel kernel, GPUError* error);
 
+// Async dispatch - returns immediately, kernel executes in background
+// Call gpu_wait_all() to synchronize
+void gpu_dispatch_kernel_async(GPUContext ctx, GPUKernel kernel, GPUError* error);
+
+// Wait for all pending async dispatches to complete
+void gpu_wait_all(GPUContext ctx);
+
+// Command batching - accumulate multiple kernels into a single submission
+void gpu_begin_batch(GPUContext ctx, GPUError* error);
+void gpu_end_batch(GPUContext ctx, GPUError* error);
+
 // Utility functions
 size_t gpu_size_of_type(GPUNumType dtype);
 const char* gpu_type_name(GPUNumType dtype);
+
+// Profiling functions
+void gpu_print_profile_stats(void);
+void gpu_reset_profile_stats(void);
 
 #ifdef ENABLE_GLFW
 // GLFW window and surface management
@@ -95,6 +113,7 @@ GPUWindow gpu_create_window(int width, int height, const char* title, GPUError* 
 void gpu_destroy_window(GPUWindow window);
 int gpu_window_should_close(GPUWindow window);
 void gpu_poll_events(void);
+int gpu_window_get_key(GPUWindow window, int key);
 
 // Surface management (for rendering to window)
 GPUSurface gpu_create_surface_for_window(GPUContext ctx, GPUWindow window, GPUError* error);

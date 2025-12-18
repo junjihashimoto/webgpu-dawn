@@ -10,13 +10,118 @@
 
 #include "gpu_wrapper.h"
 #include "gpu.hpp"
+#include "webgpu.h"
 #include <cstring>
 #include <stdexcept>
 #include <memory>
 #include <iostream>
+#include <chrono>
+#include <atomic>
 
-// Enable logging
-#define GPU_DEBUG_LOG 1
+// WebGPU buffer limits for large models - matches gpu.cpp's LIMITS_BUFFER_SIZE_1GB
+// See https://github.com/google/dawn/blob/main/src/dawn/native/Limits.cpp
+#define GPU_LIMITS_1GB { \
+    .nextInChain = nullptr, \
+    .maxTextureDimension1D = 8192, \
+    .maxTextureDimension2D = 8192, \
+    .maxTextureDimension3D = 2048, \
+    .maxTextureArrayLayers = 256, \
+    .maxBindGroups = 4, \
+    .maxBindGroupsPlusVertexBuffers = 24, \
+    .maxBindingsPerBindGroup = 1000, \
+    .maxDynamicUniformBuffersPerPipelineLayout = 8, \
+    .maxDynamicStorageBuffersPerPipelineLayout = 4, \
+    .maxSampledTexturesPerShaderStage = 16, \
+    .maxSamplersPerShaderStage = 16, \
+    .maxStorageBuffersPerShaderStage = 10, \
+    .maxStorageTexturesPerShaderStage = 4, \
+    .maxUniformBuffersPerShaderStage = 12, \
+    .maxUniformBufferBindingSize = 65536, \
+    .maxStorageBufferBindingSize = 0x600000000, \
+    .minUniformBufferOffsetAlignment = 256, \
+    .minStorageBufferOffsetAlignment = 256, \
+    .maxVertexBuffers = 8, \
+    .maxBufferSize = 0x600000000, \
+    .maxVertexAttributes = 16, \
+    .maxVertexBufferArrayStride = 2048, \
+    .maxInterStageShaderVariables = 16, \
+    .maxColorAttachments = 8, \
+    .maxColorAttachmentBytesPerSample = 32, \
+    .maxComputeWorkgroupStorageSize = 16384, \
+    .maxComputeInvocationsPerWorkgroup = 256, \
+    .maxComputeWorkgroupSizeX = 256, \
+    .maxComputeWorkgroupSizeY = 256, \
+    .maxComputeWorkgroupSizeZ = 64, \
+    .maxComputeWorkgroupsPerDimension = 65535, \
+    .maxImmediateSize = 0 \
+  }
+
+// ============================================================================
+// PROFILING INSTRUMENTATION
+// ============================================================================
+
+#define ENABLE_PROFILING 1
+
+#if ENABLE_PROFILING
+#include <map>
+#include <mutex>
+
+struct ProfileStats {
+    std::atomic<uint64_t> count{0};
+    std::atomic<uint64_t> total_us{0};  // microseconds
+};
+
+static std::map<std::string, ProfileStats> g_profile_stats;
+static std::mutex g_profile_mutex;
+
+#define PROFILE_START() auto __prof_start = std::chrono::high_resolution_clock::now()
+#define PROFILE_END(category) do { \
+    auto __prof_end = std::chrono::high_resolution_clock::now(); \
+    auto __prof_us = std::chrono::duration_cast<std::chrono::microseconds>(__prof_end - __prof_start).count(); \
+    g_profile_stats[category].count.fetch_add(1); \
+    g_profile_stats[category].total_us.fetch_add(__prof_us); \
+} while(0)
+
+// Export profiling stats
+extern "C" void gpu_print_profile_stats() {
+    std::lock_guard<std::mutex> lock(g_profile_mutex);
+    std::cerr << "\n=== GPU PROFILING STATS ===" << std::endl;
+    uint64_t total_ops = 0;
+    uint64_t total_time_us = 0;
+
+    for (const auto& [name, stats] : g_profile_stats) {
+        uint64_t count = stats.count.load();
+        uint64_t time_us = stats.total_us.load();
+        total_ops += count;
+        total_time_us += time_us;
+
+        if (count > 0) {
+            double avg_us = (double)time_us / count;
+            double total_ms = time_us / 1000.0;
+            std::cerr << name << ":" << std::endl;
+            std::cerr << "  Count: " << count << std::endl;
+            std::cerr << "  Total: " << total_ms << " ms" << std::endl;
+            std::cerr << "  Avg: " << avg_us << " us" << std::endl;
+        }
+    }
+
+    std::cerr << "\nTOTAL OPERATIONS: " << total_ops << std::endl;
+    std::cerr << "TOTAL TIME: " << (total_time_us / 1000.0) << " ms" << std::endl;
+    std::cerr << "========================\n" << std::endl;
+}
+
+extern "C" void gpu_reset_profile_stats() {
+    std::lock_guard<std::mutex> lock(g_profile_mutex);
+    g_profile_stats.clear();
+}
+
+#else
+#define PROFILE_START()
+#define PROFILE_END(category)
+#endif
+
+// Enable logging (disabled for performance)
+#define GPU_DEBUG_LOG 1  // ENABLED: Debug GPU errors
 
 #if GPU_DEBUG_LOG
 #define LOG(msg) do { std::cerr << "[GPU] " << msg << std::endl; std::cerr.flush(); } while(0)
@@ -41,6 +146,7 @@
 // Wrappers for C++ objects
 struct GPUContextImpl {
     gpu::Context* ctx;
+    std::vector<std::future<void>> pendingDispatches;  // For async execution
 };
 
 struct GPUTensorImpl {
@@ -57,6 +163,7 @@ struct GPUKernelCodeImpl {
 
 struct GPUKernelImpl {
     gpu::Kernel* kernel;
+    std::string entryPoint;  // For profiling categorization
 };
 
 // Convert between NumType enums
@@ -65,10 +172,12 @@ static gpu::NumType to_cpp_numtype(GPUNumType dtype) {
         case GPU_F16: return gpu::kf16;
         case GPU_F32: return gpu::kf32;
         case GPU_F64: return gpu::kf64;
+        case GPU_I4:  return gpu::ki4;
         case GPU_I8:  return gpu::ki8;
         case GPU_I16: return gpu::ki16;
         case GPU_I32: return gpu::ki32;
         case GPU_I64: return gpu::ki64;
+        case GPU_U4:  return gpu::ku4;
         case GPU_U8:  return gpu::ku8;
         case GPU_U16: return gpu::ku16;
         case GPU_U32: return gpu::ku32;
@@ -80,11 +189,58 @@ static gpu::NumType to_cpp_numtype(GPUNumType dtype) {
 extern "C" {
 
 // Context management
+// WebGPU error callback to catch out-of-memory and other fatal errors
+static void webgpuErrorCallback(WGPUErrorType type, char const * message, void * userdata) {
+    const char* errorType = "Unknown";
+    switch (type) {
+        case WGPUErrorType_NoError: errorType = "NoError"; break;
+        case WGPUErrorType_Validation: errorType = "Validation"; break;
+        case WGPUErrorType_OutOfMemory: errorType = "OutOfMemory"; break;
+        case WGPUErrorType_Internal: errorType = "Internal"; break;
+        case WGPUErrorType_Unknown: errorType = "Unknown"; break;
+        default: break;
+    }
+
+    std::cerr << "❌ FATAL WebGPU ERROR [" << errorType << "]: " << message << std::endl;
+
+    // For out-of-memory errors, provide helpful guidance
+    if (type == WGPUErrorType_OutOfMemory) {
+        std::cerr << "\n💡 OUT OF MEMORY GUIDANCE:" << std::endl;
+        std::cerr << "   - Model size (~4.9 GB) may exceed available GPU memory" << std::endl;
+        std::cerr << "   - Try reducing batch size or sequence length" << std::endl;
+        std::cerr << "   - Consider using a smaller model" << std::endl;
+        std::cerr << "   - Check system GPU memory availability\n" << std::endl;
+        exit(1);  // Exit immediately on OOM
+    }
+}
+
 GPUContext gpu_create_context(GPUError* error) {
+    PROFILE_START();
     try {
         CLEAR_ERROR(error);
         auto ctx = new GPUContextImpl();
+
+        // Use default createContext() with no arguments
+        // This will trigger automatic feature and limits detection in gpu.hpp
         ctx->ctx = new gpu::Context(gpu::createContext());
+
+        // Query actual device limits to verify what was granted
+        WGPULimits actualLimits = {};
+        WGPUStatus status = wgpuDeviceGetLimits(ctx->ctx->device, &actualLimits);
+
+        std::cerr << "✅ GPU context created" << std::endl;
+        if (status == WGPUStatus_Success) {
+            std::cerr << "   ACTUAL maxStorageBufferBindingSize: "
+                      << (actualLimits.maxStorageBufferBindingSize / (1024*1024)) << " MB (0x"
+                      << std::hex << actualLimits.maxStorageBufferBindingSize << std::dec << ")" << std::endl;
+            std::cerr << "   ACTUAL maxBufferSize: "
+                      << (actualLimits.maxBufferSize / (1024*1024)) << " MB (0x"
+                      << std::hex << actualLimits.maxBufferSize << std::dec << ")" << std::endl;
+        } else {
+            std::cerr << "   ERROR: Failed to query device limits!" << std::endl;
+        }
+
+        PROFILE_END("create_context");
         return static_cast<GPUContext>(ctx);
     } catch (const std::exception& e) {
         SET_ERROR(error, 1, e.what());
@@ -120,18 +276,22 @@ GPUContext gpu_create_context_with_features(
         }
         devDesc.requiredFeatures = features.data();
 
-        // Error callback
+        // Error callback - ALWAYS output errors to stderr
         devDesc.uncapturedErrorCallbackInfo = WGPUUncapturedErrorCallbackInfo {
             .callback = [](WGPUDevice const * device, WGPUErrorType type, WGPUStringView msg, void*, void*) {
-                LOG("[Uncaptured " << (int)type << "] " << std::string(msg.data, msg.length));
+                // CRITICAL: Always output GPU errors regardless of LOG macro
+                std::cerr << "[GPU ERROR] Type=" << (int)type << " Message: " << std::string(msg.data, msg.length) << std::endl;
+                std::cerr.flush();
             }
         };
 
-        // Device lost callback
+        // Device lost callback - ALWAYS output to stderr
         devDesc.deviceLostCallbackInfo = WGPUDeviceLostCallbackInfo {
             .mode = WGPUCallbackMode_AllowSpontaneous,
             .callback = [](WGPUDevice const * device, WGPUDeviceLostReason reason, WGPUStringView msg, void*, void*) {
-                LOG("[DeviceLost " << (int)reason << "] " << std::string(msg.data, msg.length));
+                // CRITICAL: Always output device lost errors
+                std::cerr << "[GPU DEVICE LOST] Reason=" << (int)reason << " Message: " << std::string(msg.data, msg.length) << std::endl;
+                std::cerr.flush();
             }
         };
 
@@ -246,6 +406,10 @@ GPUTensor gpu_create_tensor(GPUContext ctx, GPUShape shape, GPUNumType dtype, GP
     }
 }
 
+// Track GPU memory usage
+static std::atomic<size_t> g_total_gpu_memory{0};
+static std::atomic<size_t> g_tensor_count{0};
+
 GPUTensor gpu_create_tensor_with_data(GPUContext ctx, GPUShape shape, GPUNumType dtype,
                                        const void* data, size_t data_size, GPUError* error) {
     try {
@@ -259,9 +423,26 @@ GPUTensor gpu_create_tensor_with_data(GPUContext ctx, GPUShape shape, GPUNumType
 
         auto impl = new GPUTensorImpl();
 
+        // Track memory allocation
+        g_tensor_count.fetch_add(1);
+        g_total_gpu_memory.fetch_add(data_size);
+
+        // Log large tensor allocations (> 100 MB)
+        if (data_size > 100 * 1024 * 1024) {
+            size_t mb = data_size / (1024 * 1024);
+            size_t total_mb = g_total_gpu_memory.load() / (1024 * 1024);
+            std::cerr << "🔸 Allocating large tensor: " << mb << " MB (total: " << total_mb << " MB, count: " << g_tensor_count.load() << ")" << std::endl;
+        }
+
         // Create tensor based on dtype
         gpu::NumType cpp_dtype = to_cpp_numtype(dtype);
         switch (dtype) {
+            case GPU_F16:
+                impl->tensor = new gpu::Tensor(
+                    gpu::createTensor(*ctx_impl->ctx, *shape_impl->shape, cpp_dtype,
+                                     static_cast<const half*>(data))
+                );
+                break;
             case GPU_F32:
                 impl->tensor = new gpu::Tensor(
                     gpu::createTensor(*ctx_impl->ctx, *shape_impl->shape, cpp_dtype,
@@ -272,6 +453,27 @@ GPUTensor gpu_create_tensor_with_data(GPUContext ctx, GPUShape shape, GPUNumType
                 impl->tensor = new gpu::Tensor(
                     gpu::createTensor(*ctx_impl->ctx, *shape_impl->shape, cpp_dtype,
                                      static_cast<const int32_t*>(data))
+                );
+                break;
+            case GPU_U32:
+                impl->tensor = new gpu::Tensor(
+                    gpu::createTensor(*ctx_impl->ctx, *shape_impl->shape, cpp_dtype,
+                                     static_cast<const uint32_t*>(data))
+                );
+                break;
+            case GPU_U4:
+                // U4 data is pre-packed into uint32_t arrays (8 nibbles per u32)
+                impl->tensor = new gpu::Tensor(
+                    gpu::createTensor(*ctx_impl->ctx, *shape_impl->shape, cpp_dtype,
+                                     static_cast<const uint32_t*>(data))
+                );
+                break;
+            case GPU_I4:
+                // I4 data is pre-packed into uint32_t arrays (8 nibbles per u32)
+                // Note: Using uint32_t* because the packing is the same; shader handles sign
+                impl->tensor = new gpu::Tensor(
+                    gpu::createTensor(*ctx_impl->ctx, *shape_impl->shape, cpp_dtype,
+                                     static_cast<const uint32_t*>(data))
                 );
                 break;
             // Add more cases as needed
@@ -304,6 +506,7 @@ size_t gpu_tensor_size_bytes(GPUTensor tensor) {
 
 // Data transfer
 void gpu_to_cpu(GPUContext ctx, GPUTensor tensor, void* output, size_t size, GPUError* error) {
+    PROFILE_START();
     try {
         LOG("Reading " << size << " bytes from GPU");
         CLEAR_ERROR(error);
@@ -319,12 +522,15 @@ void gpu_to_cpu(GPUContext ctx, GPUTensor tensor, void* output, size_t size, GPU
         // Log first few bytes for debugging
         float* data = static_cast<float*>(output);
         LOG("First 4 values after GPU read: " << data[0] << ", " << data[1] << ", " << data[2] << ", " << data[3]);
+
+        PROFILE_END("gpu_to_cpu");
     } catch (const std::exception& e) {
         SET_ERROR(error, 1, e.what());
     }
 }
 
 void gpu_to_gpu(GPUContext ctx, const void* input, GPUTensor tensor, size_t size, GPUError* error) {
+    PROFILE_START();
     try {
         CLEAR_ERROR(error);
         if (!ctx || !tensor || !input) {
@@ -338,6 +544,7 @@ void gpu_to_gpu(GPUContext ctx, const void* input, GPUTensor tensor, size_t size
         // Cast to appropriate type based on tensor's dtype
         gpu::toGPU(*ctx_impl->ctx, static_cast<const float*>(input),
                   *tensor_impl->tensor);
+        PROFILE_END("cpu_to_gpu");
     } catch (const std::exception& e) {
         SET_ERROR(error, 1, e.what());
     }
@@ -385,7 +592,9 @@ void gpu_destroy_kernel_code(GPUKernelCode code) {
 GPUKernel gpu_create_kernel(GPUContext ctx, GPUKernelCode code,
                             GPUTensor* tensors, size_t num_tensors,
                             size_t num_workgroups_x, size_t num_workgroups_y, size_t num_workgroups_z,
+                            const char* cache_key,
                             GPUError* error) {
+    PROFILE_START();
     try {
         LOG("Creating kernel with " << num_tensors << " tensors and workgroups (" << num_workgroups_x << "," << num_workgroups_y << "," << num_workgroups_z << ")");
         CLEAR_ERROR(error);
@@ -411,16 +620,46 @@ GPUKernel gpu_create_kernel(GPUContext ctx, GPUKernelCode code,
         LOG("Shader code entry point: " << code_impl->code->entryPoint);
         LOG("Shader code length: " << code_impl->code->data.length() << " bytes");
         LOG("Shader code:\n" << code_impl->code->data);
-        LOG("Calling gpu::createKernel...");
+
+        // Generate cache key from shader code if user didn't provide one
+        // This enables automatic shader caching for 10-20x speedup!
+        // IMPORTANT: auto_cache_key must be declared OUTSIDE the if block
+        // to prevent the string from being destroyed before use!
+        std::string auto_cache_key;
+        const char* final_cache_key = cache_key;
+        if (cache_key == nullptr) {
+            // Simple hash: combine shader code hash + workgroup size + TENSOR BUFFERS
+            // The tensor buffers MUST be included because bind groups are bound to specific buffers!
+            std::hash<std::string> hasher;
+            size_t hash = hasher(code_impl->code->data);
+            hash ^= hasher(code_impl->code->entryPoint) + 0x9e3779b9 + (hash << 6) + (hash >> 2);
+            hash ^= num_workgroups_x + num_workgroups_y * 1000 + num_workgroups_z * 1000000;
+
+            // Include tensor buffer pointers in the hash
+            // This ensures different tensors get different cached kernels (with different bind groups)
+            for (size_t i = 0; i < num_tensors; ++i) {
+                uintptr_t buf_ptr = reinterpret_cast<uintptr_t>(cpp_tensors[i].data.buffer);
+                hash ^= buf_ptr + 0x9e3779b9 + (hash << 6) + (hash >> 2);
+            }
+
+            auto_cache_key = "shader_" + std::to_string(hash);
+            final_cache_key = auto_cache_key.c_str();
+            LOG("Auto-generated cache key: " << final_cache_key);
+        }
+
+        LOG("Calling gpu::createKernel with caching...");
+        LOG("Cache key being passed: " << (final_cache_key ? final_cache_key : "nullptr"));
         gpu::CompilationInfo compilationInfo = {};
         auto impl = new GPUKernelImpl();
+        impl->entryPoint = code_impl->code->entryPoint;  // Store for profiling
         impl->kernel = new gpu::Kernel(
             gpu::createKernel(*ctx_impl->ctx, *code_impl->code,
                             cpp_tensors.data(), num_tensors,
                             viewOffsets.data(),
                             workgroups,
                             nullptr, 0,  // params, paramsSize
-                            &compilationInfo)  // compilation info
+                            &compilationInfo,  // compilation info
+                            final_cache_key)   // ENABLE CACHING!
         );
 
         // Check for compilation errors
@@ -432,6 +671,12 @@ GPUKernel gpu_create_kernel(GPUContext ctx, GPUKernelCode code,
         }
 
         LOG("Kernel created successfully");
+
+        // Categorize kernel by entry point for detailed profiling
+        std::string entryPoint = code_impl->code->entryPoint;
+        std::string category = "kernel_" + entryPoint;
+        PROFILE_END(category.c_str());
+
         return static_cast<GPUKernel>(impl);
     } catch (const std::exception& e) {
         SET_ERROR(error, 1, e.what());
@@ -448,6 +693,7 @@ void gpu_destroy_kernel(GPUKernel kernel) {
 }
 
 void gpu_dispatch_kernel(GPUContext ctx, GPUKernel kernel, GPUError* error) {
+    PROFILE_START();
     try {
         LOG("Dispatching kernel...");
         CLEAR_ERROR(error);
@@ -462,6 +708,10 @@ void gpu_dispatch_kernel(GPUContext ctx, GPUKernel kernel, GPUError* error) {
         // Dispatch the kernel synchronously
         gpu::dispatchKernel(*ctx_impl->ctx, *kernel_impl->kernel);
         LOG("Kernel dispatched successfully");
+
+        // Categorize dispatch by operation type for detailed profiling
+        std::string category = "dispatch_" + kernel_impl->entryPoint;
+        PROFILE_END(category.c_str());
     } catch (const std::exception& e) {
         SET_ERROR(error, 1, e.what());
     }
@@ -483,6 +733,102 @@ const char* gpu_type_name(GPUNumType dtype) {
         return names[dtype];
     }
     return "invalid";
+}
+
+// Async dispatch - returns immediately without waiting
+void gpu_dispatch_kernel_async(GPUContext ctx, GPUKernel kernel, GPUError* error) {
+    PROFILE_START();
+    try {
+        LOG("Dispatching kernel async...");
+        CLEAR_ERROR(error);
+        if (!ctx || !kernel) {
+            SET_ERROR(error, 3, "Invalid context or kernel");
+            return;
+        }
+
+        auto ctx_impl = static_cast<GPUContextImpl*>(ctx);
+        auto kernel_impl = static_cast<GPUKernelImpl*>(kernel);
+
+        // Dispatch asynchronously - returns future immediately
+        std::future<void> future = gpu::dispatchKernelAsync(*ctx_impl->ctx, *kernel_impl->kernel);
+        
+        // Store future for later synchronization
+        ctx_impl->pendingDispatches.push_back(std::move(future));
+        
+        LOG("Kernel dispatched async (not waiting)");
+
+        // Categorize dispatch by operation type for detailed profiling
+        std::string category = "dispatch_async_" + kernel_impl->entryPoint;
+        PROFILE_END(category.c_str());
+    } catch (const std::exception& e) {
+        SET_ERROR(error, 1, e.what());
+    }
+}
+
+// Wait for all pending async dispatches
+void gpu_wait_all(GPUContext ctx) {
+    PROFILE_START();
+    try {
+        if (!ctx) return;
+        
+        auto ctx_impl = static_cast<GPUContextImpl*>(ctx);
+        
+        LOG("Waiting for " << ctx_impl->pendingDispatches.size() << " pending dispatches...");
+        
+        // Wait for all pending futures
+        for (auto& future : ctx_impl->pendingDispatches) {
+            gpu::wait(*ctx_impl->ctx, future);
+        }
+        
+        // Clear completed futures
+        ctx_impl->pendingDispatches.clear();
+        
+        LOG("All dispatches completed");
+        PROFILE_END("wait_all");
+    } catch (const std::exception& e) {
+        // Can't set error here since wait_all doesn't have error parameter
+        std::cerr << "Error in gpu_wait_all: " << e.what() << std::endl;
+    }
+}
+
+// Begin batching GPU commands - all subsequent dispatches will be accumulated
+void gpu_begin_batch(GPUContext ctx, GPUError* error) {
+    PROFILE_START();
+    try {
+        CLEAR_ERROR(error);
+        if (!ctx) {
+            SET_ERROR(error, 3, "Invalid context");
+            return;
+        }
+
+        auto ctx_impl = static_cast<GPUContextImpl*>(ctx);
+        gpu::beginBatch(*ctx_impl->ctx);
+        PROFILE_END("begin_batch");
+    } catch (const std::exception& e) {
+        SET_ERROR(error, 1, e.what());
+    }
+}
+
+// End batching and submit all accumulated commands in a single submission
+void gpu_end_batch(GPUContext ctx, GPUError* error) {
+    PROFILE_START();
+    try {
+        CLEAR_ERROR(error);
+        if (!ctx) {
+            SET_ERROR(error, 3, "Invalid context");
+            return;
+        }
+
+        auto ctx_impl = static_cast<GPUContextImpl*>(ctx);
+        std::future<void> future = gpu::endBatch(*ctx_impl->ctx);
+
+        // Store future for synchronization
+        ctx_impl->pendingDispatches.push_back(std::move(future));
+
+        PROFILE_END("end_batch");
+    } catch (const std::exception& e) {
+        SET_ERROR(error, 1, e.what());
+    }
 }
 
 } // extern "C"

@@ -45,10 +45,12 @@ data NumType
   = F16
   | F32
   | F64
+  | I4   -- 4-bit signed (packed: 8 nibbles per u32)
   | I8
   | I16
   | I32
   | I64
+  | U4   -- 4-bit unsigned (packed: 8 nibbles per u32)
   | U8
   | U16
   | U32
@@ -121,13 +123,25 @@ foreign import ccall unsafe "gpu_destroy_kernel_code"
 
 -- Kernel compilation and execution
 foreign import ccall unsafe "gpu_create_kernel"
-  c_createKernel :: Context -> KernelCode -> Ptr Tensor -> CSize -> CSize -> CSize -> CSize -> Ptr GPUError -> IO Kernel
+  c_createKernel :: Context -> KernelCode -> Ptr Tensor -> CSize -> CSize -> CSize -> CSize -> Ptr CChar -> Ptr GPUError -> IO Kernel
 
 foreign import ccall unsafe "gpu_destroy_kernel"
   c_destroyKernel :: Kernel -> IO ()
 
 foreign import ccall unsafe "gpu_dispatch_kernel"
   c_dispatchKernel :: Context -> Kernel -> Ptr GPUError -> IO ()
+
+foreign import ccall unsafe "gpu_dispatch_kernel_async"
+  c_dispatchKernelAsync :: Context -> Kernel -> Ptr GPUError -> IO ()
+
+foreign import ccall unsafe "gpu_wait_all"
+  c_waitAll :: Context -> IO ()
+
+foreign import ccall unsafe "gpu_begin_batch"
+  c_beginBatch :: Context -> Ptr GPUError -> IO ()
+
+foreign import ccall unsafe "gpu_end_batch"
+  c_endBatch :: Context -> Ptr GPUError -> IO ()
 
 -- Utility functions
 foreign import ccall unsafe "gpu_size_of_type"

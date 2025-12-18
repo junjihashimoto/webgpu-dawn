@@ -193,6 +193,66 @@ ensureDawn glfwEnabled = do
     then return Nothing
     else buildDawn glfwEnabled
 
+-- Download pre-built Dawn binaries from GitHub releases
+downloadDawnCache :: FilePath -> Bool -> IO Bool
+downloadDawnCache dest glfwEnabled = do
+  dawnVersion <- getDawnVersion
+  let githubRepo = "junjihashimoto/webgpu-dawn"
+      -- Use a release tag that matches the Dawn commit
+      releaseTag = "v0.1.0"  -- Update this to match your release
+      archiveName = "dawn-" ++ dawnVersion ++ "-" ++ platformTag ++ ".tar.gz"
+      downloadUrl = "https://github.com/" ++ githubRepo ++ "/releases/download/" ++ releaseTag ++ "/" ++ archiveName
+      checksumUrl = downloadUrl ++ ".sha256"
+
+  putStrLn $ "Attempting to download pre-built Dawn from GitHub releases..."
+  putStrLn $ "URL: " ++ downloadUrl
+
+  -- Try to download
+  result <- try $ do
+    createDirectoryIfMissing True dest
+
+    withSystemTempDirectory "dawn-cache-download" $ \tmpDir -> do
+      let tarballPath = tmpDir </> archiveName
+          checksumPath = tmpDir </> (archiveName ++ ".sha256")
+
+      -- Download archive
+      putStrLn "Downloading Dawn binary cache..."
+      request <- parseRequest downloadUrl
+      response <- httpLBS request
+      LBS.writeFile tarballPath (getResponseBody response)
+
+      -- Download and verify checksum
+      putStrLn "Downloading checksum..."
+      checksumReq <- parseRequest checksumUrl
+      checksumResp <- httpLBS checksumReq
+      LBS.writeFile checksumPath (getResponseBody checksumResp)
+
+      -- Verify checksum
+      putStrLn "Verifying checksum..."
+      expectedChecksum <- head . words <$> readFile checksumPath
+      (_, actualChecksumOutput, _) <- readProcessWithExitCode "shasum" ["-a", "256", tarballPath] ""
+      let actualChecksum = head $ words actualChecksumOutput
+
+      if expectedChecksum /= actualChecksum
+        then do
+          putStrLn $ "Checksum mismatch! Expected: " ++ expectedChecksum ++ ", Got: " ++ actualChecksum
+          return False
+        else do
+          putStrLn "Checksum verified!"
+
+          -- Extract archive
+          putStrLn $ "Extracting to " ++ dest ++ "..."
+          callProcess "tar" ["-xzf", tarballPath, "-C", dest]
+
+          putStrLn "✓ Dawn binary cache downloaded successfully!"
+          return True
+
+  case result of
+    Right success -> return success
+    Left (e :: SomeException) -> do
+      putStrLn $ "Failed to download cache: " ++ show e
+      return False
+
 isNixSandbox :: IO Bool
 isNixSandbox = do
   nix <- lookupEnv "NIX_BUILD_TOP"
@@ -222,12 +282,29 @@ buildDawn glfwEnabled = do
       if present && exists
         then pure $ Just dest
         else do
-          putStrLn $ "Dawn not found in local cache, building to " <> dest
-          buildDawnTo dest glfwEnabled
-
-          -- Create an idempotence marker
-          writeFile marker ""
-          pure $ Just dest
+          -- Check if user wants to force building from source
+          forceBuild <- lookupEnv "DAWN_BUILD_FROM_SOURCE"
+          case forceBuild of
+            Just "1" -> do
+              -- Force build from source, skip cache download
+              putStrLn "DAWN_BUILD_FROM_SOURCE=1 set; building from source..."
+              buildDawnTo dest glfwEnabled
+              writeFile marker ""
+              pure $ Just dest
+            _ -> do
+              -- Try to download from GitHub releases first (default behavior)
+              putStrLn "Dawn not found in local cache."
+              downloaded <- downloadDawnCache dest glfwEnabled
+              if downloaded
+                then do
+                  writeFile marker ""
+                  pure $ Just dest
+                else do
+                  -- Fall back to building from source
+                  putStrLn "Downloading from cache failed, building from source..."
+                  buildDawnTo dest glfwEnabled
+                  writeFile marker ""
+                  pure $ Just dest
 
 buildDawnTo :: FilePath -> Bool -> IO ()
 buildDawnTo dest glfwEnabled = do

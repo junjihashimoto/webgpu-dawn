@@ -11,6 +11,11 @@ module Graphics.WebGPU.Dawn.Kernel
   , destroyKernel
     -- * Kernel Execution
   , dispatchKernel
+  , dispatchKernelAsync
+  , waitAll
+    -- * Command Batching
+  , beginBatch
+  , endBatch
     -- * Workgroup Configuration
   , WorkgroupSize(..)
   , defaultWorkgroupSize
@@ -65,10 +70,11 @@ destroyKernelCode :: KernelCode -> IO ()
 destroyKernelCode (KernelCode code) = I.c_destroyKernelCode code
 
 -- | Compile a kernel from kernel code with bound tensors
+-- Note: Tensors can have different dtype parameters, so we use existential types here
 compileKernel
   :: Context
   -> KernelCode
-  -> [Tensor]           -- ^ Input/output tensors to bind
+  -> [Tensor dtype]           -- ^ Input/output tensors to bind (all same dtype for now)
   -> WorkgroupSize      -- ^ Number of workgroups to dispatch
   -> IO Kernel
 compileKernel (Context ctx) (KernelCode code) tensors wgSize = alloca $ \errPtr -> do
@@ -87,6 +93,7 @@ compileKernel (Context ctx) (KernelCode code) tensors wgSize = alloca $ \errPtr 
       (fromIntegral wx)
       (fromIntegral wy)
       (fromIntegral wz)
+      nullPtr      -- cache_key: nullptr enables auto-generation in C++
       errPtr
 
   checkError errPtr
@@ -99,9 +106,42 @@ compileKernel (Context ctx) (KernelCode code) tensors wgSize = alloca $ \errPtr 
 destroyKernel :: Kernel -> IO ()
 destroyKernel (Kernel kernel) = I.c_destroyKernel kernel
 
--- | Dispatch (execute) a compiled kernel on the GPU
+-- | Dispatch (execute) a compiled kernel on the GPU (synchronous)
+-- This waits for the kernel to complete before returning
 dispatchKernel :: Context -> Kernel -> IO ()
 dispatchKernel (Context ctx) (Kernel kernel) = alloca $ \errPtr -> do
   poke errPtr (I.GPUError 0 nullPtr)
   I.c_dispatchKernel ctx kernel errPtr
+  checkError errPtr
+
+-- | Dispatch a kernel asynchronously (non-blocking)
+-- The kernel executes in the background. Call 'waitAll' to synchronize.
+-- This allows GPU pipelining for much better performance!
+dispatchKernelAsync :: Context -> Kernel -> IO ()
+dispatchKernelAsync (Context ctx) (Kernel kernel) = alloca $ \errPtr -> do
+  poke errPtr (I.GPUError 0 nullPtr)
+  I.c_dispatchKernelAsync ctx kernel errPtr
+  checkError errPtr
+
+-- | Wait for all pending async kernel dispatches to complete
+-- Call this before reading results from GPU tensors
+waitAll :: Context -> IO ()
+waitAll (Context ctx) = I.c_waitAll ctx
+
+-- | Begin batching GPU commands - all subsequent kernel dispatches will be accumulated
+-- into a single command encoder and submitted together when endBatch is called.
+-- This ensures proper synchronization barriers between dependent kernels.
+beginBatch :: Context -> IO ()
+beginBatch (Context ctx) = alloca $ \errPtr -> do
+  poke errPtr (I.GPUError 0 nullPtr)
+  I.c_beginBatch ctx errPtr
+  checkError errPtr
+
+-- | End batching and submit all accumulated GPU commands in a single submission.
+-- WebGPU automatically inserts memory barriers between compute passes to ensure
+-- proper synchronization of dependent operations.
+endBatch :: Context -> IO ()
+endBatch (Context ctx) = alloca $ \errPtr -> do
+  poke errPtr (I.GPUError 0 nullPtr)
+  I.c_endBatch ctx errPtr
   checkError errPtr

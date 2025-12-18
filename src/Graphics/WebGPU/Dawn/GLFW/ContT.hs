@@ -10,6 +10,7 @@ module Graphics.WebGPU.Dawn.GLFW.ContT
   , createWindow
   , Window
   , windowShouldClose
+  , windowGetKey
   , pollEvents
     -- * Surface Management
   , createSurfaceForWindow
@@ -56,6 +57,7 @@ import Graphics.WebGPU.Dawn.GLFW.Internal
   , ShaderModule
   , RenderPipeline
   , windowShouldClose
+  , windowGetKey
   , pollEvents
   , surfacePresent
   , getSurfacePreferredFormat

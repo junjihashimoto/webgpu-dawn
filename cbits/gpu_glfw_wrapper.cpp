@@ -81,6 +81,14 @@ void gpu_poll_events(void) {
     glfwPollEvents();
 }
 
+int gpu_window_get_key(GPUWindow window, int key) {
+    if (!window) {
+        return GLFW_RELEASE;
+    }
+    auto glfw_window = static_cast<GLFWwindow*>(window);
+    return glfwGetKey(glfw_window, key);
+}
+
 // Surface management
 GPUSurface gpu_create_surface_for_window(GPUContext ctx, GPUWindow window, GPUError* error) {
     try {

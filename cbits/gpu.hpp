@@ -196,10 +196,12 @@ enum NumType {
   kf16, // (experimental)
   kf32,
   kf64,
+  ki4,  // 4-bit signed (packed: 8 nibbles per u32)
   ki8,
   ki16,
   ki32,
   ki64,
+  ku4,  // 4-bit unsigned (packed: 8 nibbles per u32)
   ku8,
   ku16,
   ku32,
@@ -218,6 +220,8 @@ inline size_t sizeBytes(const NumType &type, int numElements = 1) {
     return sizeof(float) * numElements;
   case kf64:
     return sizeof(double) * numElements;
+  case ki4:
+    return sizeof(uint32_t) * ((numElements + 7) / 8);  // 8 nibbles per u32
   case ki8:
     return sizeof(uint32_t) * ((numElements + 3) / 4);
   case ki16:
@@ -226,6 +230,8 @@ inline size_t sizeBytes(const NumType &type, int numElements = 1) {
     return sizeof(int32_t) * numElements;
   case ki64:
     return sizeof(int64_t) * numElements;
+  case ku4:
+    return sizeof(uint32_t) * ((numElements + 7) / 8);  // 8 nibbles per u32
   case ku8:
     return sizeof(uint32_t) * ((numElements + 3) / 4);
   case ku16:
@@ -251,6 +257,8 @@ inline std::string toString(NumType type) {
     return "f32";
   case kf64:
     return "f64";
+  case ki4:
+    return "i4";
   case ki8:
     return "i8";
   case ki16:
@@ -259,6 +267,8 @@ inline std::string toString(NumType type) {
     return "i32";
   case ki64:
     return "i64";
+  case ku4:
+    return "u4";
   case ku8:
     return "u8";
   case ku16:
@@ -588,6 +598,10 @@ struct Context {
   WGPURequestAdapterStatus adapterStatus;
   WGPURequestDeviceStatus deviceStatus;
 
+  // Command batching state
+  WGPUCommandEncoder batchEncoder = nullptr;
+  bool inBatch = false;
+
   // Default constructor
   Context() = default;
 
@@ -632,6 +646,12 @@ struct Context {
     LOG(kDefLog, kTrace,
         "WebAssembly context destruction - skipping processEvents");
 #endif
+
+    // Clean up batch encoder if active
+    if (batchEncoder) {
+      wgpuCommandEncoderRelease(batchEncoder);
+      batchEncoder = nullptr;
+    }
 
     if (queue) {
       wgpuQueueRelease(queue);
@@ -761,6 +781,10 @@ inline Tensor createTensor(Context &ctx, const Shape &shape, NumType dtype,
                        WGPUBufferUsage_CopySrc);
   wgpuQueueWriteBuffer(ctx.queue, tensor.data.buffer, 0, data,
                        tensor.data.size);
+  // ALWAYS force synchronization when using V.unsafeWith from Haskell FFI
+  // The data pointer is only valid during the unsafeWith callback
+  wgpuQueueSubmit(ctx.queue, 0, nullptr);
+  wgpuInstanceProcessEvents(ctx.instance);
   return tensor;
 }
 
@@ -773,6 +797,10 @@ inline Tensor createTensor(Context &ctx, const Shape &shape, NumType dtype,
                        WGPUBufferUsage_CopySrc);
   wgpuQueueWriteBuffer(ctx.queue, tensor.data.buffer, 0, data,
                        tensor.data.size);
+  // ALWAYS force synchronization when using V.unsafeWith from Haskell FFI
+  // The data pointer is only valid during the unsafeWith callback
+  wgpuQueueSubmit(ctx.queue, 0, nullptr);
+  wgpuInstanceProcessEvents(ctx.instance);
   return tensor;
 }
 
@@ -871,7 +899,8 @@ inline Tensor createTensor(Context &ctx, const Shape &shape, NumType dtype,
 
 inline Tensor createTensor(Context &ctx, const Shape &shape, NumType dtype,
                            const uint32_t *data) {
-  assert(dtype == ku32);
+  // Accept ku32, ku4, and ki4 (4-bit types are pre-packed into uint32 arrays)
+  assert(dtype == ku32 || dtype == ku4 || dtype == ki4);
   Tensor tensor =
       createTensor(ctx.pool, ctx.device, shape, dtype,
                    WGPUBufferUsage_Storage | WGPUBufferUsage_CopyDst |
@@ -1290,8 +1319,65 @@ createContextAsync(const WGPUInstanceDescriptor &desc = {},
     promise->set_exception(std::make_exception_ptr(ex));
     return promise->get_future();
   }
+
+  // Auto-detect and enable features/limits if not explicitly configured
+  WGPUDeviceDescriptor actualDevDescriptor = devDescriptor;
+  std::vector<WGPUFeatureName> requestedFeatures;
+  WGPULimits adapterLimits{};
+
+  // If user didn't provide custom features, auto-detect
+  if (devDescriptor.requiredFeatureCount == 0) {
+    // Query adapter features
+    WGPUSupportedFeatures supportedFeatures{};
+    wgpuAdapterGetFeatures(ctx.adapter, &supportedFeatures);
+
+    fprintf(stderr, "🔍 GPU: Detected %zu features from adapter\n", supportedFeatures.featureCount);
+
+    // Check if shader-f16 is supported
+    bool hasShaderF16 = false;
+    for (size_t i = 0; i < supportedFeatures.featureCount; ++i) {
+      if (supportedFeatures.features[i] == WGPUFeatureName_ShaderF16) {
+        hasShaderF16 = true;
+        break;
+      }
+    }
+
+    // Enable shader-f16 if available
+    if (hasShaderF16) {
+      requestedFeatures.push_back(WGPUFeatureName_ShaderF16);
+      actualDevDescriptor.requiredFeatureCount = requestedFeatures.size();
+      actualDevDescriptor.requiredFeatures = requestedFeatures.data();
+      fprintf(stderr, "✅ Auto-enabled shader-f16 feature\n");
+    } else {
+      fprintf(stderr, "⚠️  Shader-f16 feature NOT supported by this GPU\n");
+    }
+  }
+
+  // If user didn't provide custom limits, auto-detect and request maximum available
+  if (devDescriptor.requiredLimits == nullptr) {
+    // Query adapter limits
+    if (wgpuAdapterGetLimits(ctx.adapter, &adapterLimits) == WGPUStatus_Success) {
+      fprintf(stderr, "GPU: Detected limits:\n");
+      fprintf(stderr, "  maxStorageBufferBindingSize: %llu bytes (%.2f MB)\n",
+             adapterLimits.maxStorageBufferBindingSize,
+             adapterLimits.maxStorageBufferBindingSize / (1024.0 * 1024.0));
+      fprintf(stderr, "  maxBufferSize: %llu bytes (%.2f MB)\n",
+             adapterLimits.maxBufferSize,
+             adapterLimits.maxBufferSize / (1024.0 * 1024.0));
+      fprintf(stderr, "  maxStorageBuffersPerShaderStage: %u\n",
+             adapterLimits.maxStorageBuffersPerShaderStage);
+      fprintf(stderr, "  maxBindGroups: %u\n", adapterLimits.maxBindGroups);
+
+      // Request the maximum limits supported by the adapter
+      actualDevDescriptor.requiredLimits = &adapterLimits;
+      fprintf(stderr, "✅ Auto-configured buffer limits to maximum supported values\n");
+    } else {
+      fprintf(stderr, "⚠️  Failed to query adapter limits\n");
+    }
+  }
+
   try {
-    auto deviceFuture = requestDeviceAsync(ctx.adapter, devDescriptor);
+    auto deviceFuture = requestDeviceAsync(ctx.adapter, actualDevDescriptor);
     ctx.device = wait(ctx, deviceFuture);
     ctx.deviceStatus = WGPURequestDeviceStatus_Success;
   } catch (const std::exception &ex) {
@@ -2682,8 +2768,9 @@ createKernelAsync(Context &ctx, const KernelCode &code,
                          totalWorkgroups[2]};
 
   resetCommandBuffer(device, op);
-  if (cacheKey != nullptr)
+  if (cacheKey != nullptr) {
     ctx.kernelPool.data[cacheKey] = op;
+  }
 
   outerPromise.set_value(op);
   return outerFuture;
@@ -2858,31 +2945,59 @@ inline void dispatchKernelCallback(WGPUQueueWorkDoneStatus status,
  * @endcode
  */
 inline std::future<void> dispatchKernelAsync(Context &ctx, Kernel &kernel) {
-  // If the kernel was used before, reset the command buffer.
-  if (kernel->used) {
-    resetCommandBuffer(ctx.device, kernel);
+  if (ctx.inBatch) {
+    // BATCH MODE: Append compute pass to the shared batch encoder
+    // This allows multiple kernels to be submitted together with proper barriers
+
+    WGPUComputePassEncoder computePassEncoder =
+        wgpuCommandEncoderBeginComputePass(ctx.batchEncoder, nullptr);
+    if (!computePassEncoder) {
+      throw std::runtime_error("Failed to begin compute pass in batch mode");
+    }
+
+    wgpuComputePassEncoderSetPipeline(computePassEncoder, kernel->computePipeline);
+    wgpuComputePassEncoderSetBindGroup(computePassEncoder, 0, kernel->bindGroup, 0,
+                                       nullptr);
+    wgpuComputePassEncoderDispatchWorkgroups(
+        computePassEncoder, kernel->totalWorkgroups[0], kernel->totalWorkgroups[1],
+        kernel->totalWorkgroups[2]);
+    wgpuComputePassEncoderEnd(computePassEncoder);
+    wgpuComputePassEncoderRelease(computePassEncoder);
+
+    // Return an already-fulfilled future since we're not submitting yet
+    std::promise<void> promise;
+    promise.set_value();
+    return promise.get_future();
+
+  } else {
+    // INDIVIDUAL MODE: Submit immediately (original behavior)
+
+    // If the kernel was used before, reset the command buffer.
+    if (kernel->used) {
+      resetCommandBuffer(ctx.device, kernel);
+    }
+
+    // Submit the command buffer and release it.
+    wgpuQueueSubmit(ctx.queue, 1, &kernel->commandBuffer);
+    wgpuCommandBufferRelease(kernel->commandBuffer);
+    kernel->used = true;
+
+    // Allocate a promise on the heap so it remains valid beyond this function's
+    // scope.
+    std::promise<void> *promise = new std::promise<void>();
+    std::future<void> future = promise->get_future();
+
+    // Set up the callback info.
+    WGPUQueueWorkDoneCallbackInfo workDoneCallbackInfo = {};
+    workDoneCallbackInfo.mode = WGPUCallbackMode_AllowSpontaneous;
+    workDoneCallbackInfo.callback = dispatchKernelCallback;
+    workDoneCallbackInfo.userdata1 = reinterpret_cast<void *>(promise);
+    workDoneCallbackInfo.userdata2 = nullptr;
+
+    wgpuQueueOnSubmittedWorkDone(ctx.queue, workDoneCallbackInfo);
+
+    return future;
   }
-
-  // Submit the command buffer and release it.
-  wgpuQueueSubmit(ctx.queue, 1, &kernel->commandBuffer);
-  wgpuCommandBufferRelease(kernel->commandBuffer);
-  kernel->used = true;
-
-  // Allocate a promise on the heap so it remains valid beyond this function’s
-  // scope.
-  std::promise<void> *promise = new std::promise<void>();
-  std::future<void> future = promise->get_future();
-
-  // Set up the callback info.
-  WGPUQueueWorkDoneCallbackInfo workDoneCallbackInfo = {};
-  workDoneCallbackInfo.mode = WGPUCallbackMode_AllowSpontaneous;
-  workDoneCallbackInfo.callback = dispatchKernelCallback;
-  workDoneCallbackInfo.userdata1 = reinterpret_cast<void *>(promise);
-  workDoneCallbackInfo.userdata2 = nullptr;
-
-  wgpuQueueOnSubmittedWorkDone(ctx.queue, workDoneCallbackInfo);
-
-  return future;
 }
 
 /**
@@ -2900,6 +3015,75 @@ inline std::future<void> dispatchKernelAsync(Context &ctx, Kernel &kernel) {
 inline void dispatchKernel(Context &ctx, Kernel &kernel) {
   auto future = dispatchKernelAsync(ctx, kernel);
   wait(ctx, future);
+}
+
+/**
+ * @brief Begin batching GPU commands into a single command encoder.
+ *
+ * After calling beginBatch, all subsequent dispatchKernelAsync calls will
+ * append their compute passes to the shared batch encoder instead of
+ * submitting immediately. This allows multiple dependent kernels to be
+ * executed with proper synchronization barriers between passes.
+ *
+ * Must be followed by endBatch() to submit the accumulated commands.
+ *
+ * @param[in,out] ctx Context instance
+ */
+inline void beginBatch(Context &ctx) {
+  if (ctx.inBatch) {
+    throw std::runtime_error("Already in batch mode");
+  }
+
+  ctx.batchEncoder = wgpuDeviceCreateCommandEncoder(ctx.device, nullptr);
+  if (!ctx.batchEncoder) {
+    throw std::runtime_error("Failed to create batch command encoder");
+  }
+  ctx.inBatch = true;
+}
+
+/**
+ * @brief End batch mode and submit all accumulated commands to the GPU queue.
+ *
+ * Finishes the batch command encoder and submits all accumulated compute
+ * passes to the GPU queue. WebGPU automatically inserts memory barriers
+ * between passes to ensure proper synchronization.
+ *
+ * @param[in,out] ctx Context instance
+ * @return Future that completes when all batched work is done
+ */
+inline std::future<void> endBatch(Context &ctx) {
+  if (!ctx.inBatch) {
+    throw std::runtime_error("Not in batch mode");
+  }
+
+  // Finish the batch encoder to create the command buffer
+  WGPUCommandBuffer commandBuffer = wgpuCommandEncoderFinish(ctx.batchEncoder, nullptr);
+  if (!commandBuffer) {
+    throw std::runtime_error("Failed to finish command encoder");
+  }
+
+  // Submit the entire batch at once
+  wgpuQueueSubmit(ctx.queue, 1, &commandBuffer);
+  wgpuCommandBufferRelease(commandBuffer);
+
+  // Clean up batch state
+  wgpuCommandEncoderRelease(ctx.batchEncoder);
+  ctx.batchEncoder = nullptr;
+  ctx.inBatch = false;
+
+  // Set up completion callback
+  std::promise<void> *promise = new std::promise<void>();
+  std::future<void> future = promise->get_future();
+
+  WGPUQueueWorkDoneCallbackInfo workDoneCallbackInfo = {};
+  workDoneCallbackInfo.mode = WGPUCallbackMode_AllowSpontaneous;
+  workDoneCallbackInfo.callback = dispatchKernelCallback;
+  workDoneCallbackInfo.userdata1 = reinterpret_cast<void *>(promise);
+  workDoneCallbackInfo.userdata2 = nullptr;
+
+  wgpuQueueOnSubmittedWorkDone(ctx.queue, workDoneCallbackInfo);
+
+  return future;
 }
 
 } // namespace gpu
