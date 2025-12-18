@@ -9,30 +9,31 @@ description:
 license:            MIT
 author:             Junji Hashimoto
 maintainer:         junji.hashimoto@gmail.com
+homepage:           https://github.com/junjihashimoto/webgpu-dawn
 category:           Graphics, GPU
 build-type:         Custom
+extra-source-files: README.md
+
+source-repository head
+  type:     git
+  location: https://github.com/junjihashimoto/webgpu-dawn
 
 flag glfw
   description: Enable GLFW support for windowed graphics applications
   default: True
   manual: True
 
-extra-source-files:
-  README.md
-  cbits/*.h
-  cbits/*.c
-
 custom-setup
   setup-depends:
     base >= 4.14 && < 5,
-    Cabal >= 3.0,
-    directory >= 1.3,
-    filepath >= 1.4,
-    process >= 1.6,
-    http-conduit >= 2.3,
-    bytestring >= 0.10,
-    zip-archive >= 0.4,
-    temporary >= 1.3
+    Cabal >= 3.0 && < 3.13,
+    directory >= 1.3 && < 1.4,
+    filepath >= 1.4 && < 1.6,
+    process >= 1.6 && < 1.7,
+    http-conduit >= 2.3 && < 2.4,
+    bytestring >= 0.10 && < 0.13,
+    zip-archive >= 0.4 && < 0.5,
+    temporary >= 1.3 && < 1.4
 
 library
   exposed-modules:
@@ -53,17 +54,25 @@ library
 
   build-depends:
     base >= 4.14 && < 5,
-    bytestring >= 0.10,
-    vector >= 0.12
+    bytestring >= 0.10 && < 0.13,
+    vector >= 0.12 && < 0.14
 
   c-sources:
     cbits/gpu_wrapper.c
 
   cxx-sources:
     cbits/gpu_cpp_bridge.cpp
+    cbits/numeric_types/half.cpp
 
   if flag(glfw)
     cxx-sources: cbits/gpu_glfw_wrapper.cpp
+
+  install-includes:
+    cbits/gpu_wrapper.h
+    cbits/gpu.hpp
+    cbits/numeric_types/half.hpp
+    cbits/utils/array_utils.hpp
+    cbits/utils/logging.hpp
 
   cxx-options:
     -std=c++17
@@ -74,6 +83,8 @@ library
 
   include-dirs:
     cbits
+    cbits/numeric_types
+    cbits/utils
 
   -- These will be populated by Setup.hs based on platform
   -- extra-lib-dirs:
@@ -94,7 +105,7 @@ library
   if os(linux)
     extra-libraries: stdc++
 
-  ghc-options: -Wall -O2
+  ghc-options: -Wall
 
 test-suite webgpu-dawn-tests
   type:             exitcode-stdio-1.0
