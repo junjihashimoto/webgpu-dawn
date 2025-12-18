@@ -1,5 +1,7 @@
 # webgpu-dawn
 
+[![CI](https://github.com/junjihashimoto/webgpu-dawn/workflows/CI/badge.svg)](https://github.com/junjihashimoto/webgpu-dawn/actions)
+
 High-level Haskell bindings to Google's [Dawn WebGPU](https://dawn.googlesource.com/dawn) implementation for GPU computing and graphics programming.
 
 ## Features
@@ -146,6 +148,7 @@ data WorkgroupSize = WorkgroupSize { workgroupX, workgroupY, workgroupZ :: Int }
 - `DAWN_HOME`: Custom installation directory (default: `~/.cache/dawn`)
 - `DAWN_VERSION`: Specific Dawn commit to use (default: tested commit)
 - `DAWN_SKIP_BUILD`: Skip building Dawn (assumes system installation)
+- `DAWN_USE_GIT`: Set to `1` to use git clone instead of tarball download (default: tarball download, no git required)
 
 ### Platform Support
 

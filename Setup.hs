@@ -111,6 +111,60 @@ getDawnVersion = do
     Nothing -> return "3f79f3aefe0b0a498002564fcfb13eb21ab6c047"  -- Known working commit
     Just other -> return other
 
+-- Build Dawn using git clone
+buildDawnWithGit :: FilePath -> String -> IO ()
+buildDawnWithGit dawnSrc dawnVersion = do
+  putStrLn "Using git to fetch Dawn repository..."
+  createDirectoryIfMissing True dawnSrc
+
+  -- Initialize git repo
+  callProcess "git" ["init", dawnSrc]
+
+  -- Check if origin exists
+  (_, _, _, ph) <- createProcess (proc "git" ["remote", "get-url", "origin"])
+    { cwd = Just dawnSrc
+    , std_out = CreatePipe
+    , std_err = CreatePipe
+    }
+  exitCode <- waitForProcess ph
+
+  case exitCode of
+    ExitSuccess ->
+      callProcess "git" ["-C", dawnSrc, "remote", "set-url", "origin", "https://dawn.googlesource.com/dawn"]
+    ExitFailure _ ->
+      callProcess "git" ["-C", dawnSrc, "remote", "add", "origin", "https://dawn.googlesource.com/dawn"]
+
+  -- Fetch and checkout specific commit
+  putStrLn $ "Fetching Dawn commit: " ++ dawnVersion
+  callProcess "git" ["-C", dawnSrc, "fetch", "origin", dawnVersion]
+  callProcess "git" ["-C", dawnSrc, "checkout", dawnVersion]
+  callProcess "git" ["-C", dawnSrc, "reset", "--hard", dawnVersion]
+
+-- Build Dawn by downloading tarball (no git required)
+buildDawnWithoutGit :: FilePath -> String -> IO ()
+buildDawnWithoutGit dawnSrc dawnVersion = do
+  putStrLn "Downloading Dawn source tarball (no git required)..."
+  createDirectoryIfMissing True dawnSrc
+
+  -- Download tarball from GitHub mirror or googlesource
+  let tarballUrl = "https://dawn.googlesource.com/dawn/+archive/" ++ dawnVersion ++ ".tar.gz"
+  putStrLn $ "Downloading from: " ++ tarballUrl
+
+  -- Use temporary file for download
+  withSystemTempDirectory "dawn-download" $ \tmpDir -> do
+    let tarballPath = tmpDir </> "dawn.tar.gz"
+
+    -- Download tarball
+    request <- parseRequest tarballUrl
+    response <- httpLBS request
+    LBS.writeFile tarballPath (getResponseBody response)
+
+    putStrLn "Extracting tarball..."
+    -- Extract tarball to dawnSrc
+    callProcess "tar" ["-xzf", tarballPath, "-C", dawnSrc]
+
+  putStrLn $ "Dawn source extracted to: " ++ dawnSrc
+
 getLocalUserDawnDir :: IO FilePath
 getLocalUserDawnDir = do
   mHome <- lookupEnv "DAWN_HOME"
@@ -179,36 +233,17 @@ buildDawnTo :: FilePath -> Bool -> IO ()
 buildDawnTo dest glfwEnabled = do
   createDirectoryIfMissing True dest
 
-  -- Clone or update Dawn repository
+  -- Check if we should use git or direct download
+  -- By default, use tarball download (no git required)
+  -- Set DAWN_USE_GIT=1 to use git clone instead
+  useGit <- lookupEnv "DAWN_USE_GIT"
   dawnVersion <- getDawnVersion
   let dawnSrc = dest </> "src"
       dawnBuild = dest </> "build"
 
-  putStrLn "Cloning Dawn repository..."
-  createDirectoryIfMissing True dawnSrc
-
-  -- Initialize git repo
-  callProcess "git" ["init", dawnSrc]
-
-  -- Check if origin exists
-  (_, _, _, ph) <- createProcess (proc "git" ["remote", "get-url", "origin"])
-    { cwd = Just dawnSrc
-    , std_out = CreatePipe
-    , std_err = CreatePipe
-    }
-  exitCode <- waitForProcess ph
-
-  case exitCode of
-    ExitSuccess ->
-      callProcess "git" ["-C", dawnSrc, "remote", "set-url", "origin", "https://dawn.googlesource.com/dawn"]
-    ExitFailure _ ->
-      callProcess "git" ["-C", dawnSrc, "remote", "add", "origin", "https://dawn.googlesource.com/dawn"]
-
-  -- Fetch and checkout specific commit
-  putStrLn $ "Fetching Dawn commit: " ++ dawnVersion
-  callProcess "git" ["-C", dawnSrc, "fetch", "origin", dawnVersion]
-  callProcess "git" ["-C", dawnSrc, "checkout", dawnVersion]
-  callProcess "git" ["-C", dawnSrc, "reset", "--hard", dawnVersion]
+  case useGit of
+    Just "1" -> buildDawnWithGit dawnSrc dawnVersion
+    _ -> buildDawnWithoutGit dawnSrc dawnVersion
 
   -- Apply macOS fix if needed (using ByteString for strict IO)
   when (buildOS == OSX) $ do

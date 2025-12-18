@@ -1,0 +1,56 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  build-macos:
+    name: Build on macOS
+    runs-on: macos-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Haskell
+      uses: haskell-actions/setup@v2
+      with:
+        ghc-version: '9.6.7'
+        cabal-version: '3.10'
+
+    - name: Cache Cabal packages
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cabal/packages
+          ~/.cabal/store
+          dist-newstyle
+        key: ${{ runner.os }}-cabal-${{ hashFiles('**/*.cabal', '**/cabal.project') }}
+        restore-keys: |
+          ${{ runner.os }}-cabal-
+
+    - name: Cache Dawn build
+      uses: actions/cache@v4
+      with:
+        path: ~/.cache/dawn
+        key: ${{ runner.os }}-dawn-${{ hashFiles('.github/workflows/ci.yml') }}
+        restore-keys: |
+          ${{ runner.os }}-dawn-
+
+    - name: Update cabal package list
+      run: cabal update
+
+    - name: Build dependencies
+      run: cabal build --only-dependencies all
+
+    - name: Build library and examples
+      run: cabal build all
+
+    - name: Run HelloGPU example
+      run: cabal run hello-gpu
+
+    - name: Run VectorAdd example
+      run: cabal run vector-add
