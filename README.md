@@ -12,6 +12,7 @@ High-level Haskell bindings to Google's [Dawn WebGPU](https://dawn.googlesource.
 - **Cross-platform**: Supports macOS (Metal), Linux (Vulkan), and Windows (D3D12)
 - **Zero-copy Data Transfer**: Efficient CPU↔GPU data transfer using `vector` and `Storable`
 - **Safe Resource Management**: Automatic cleanup with Haskell's resource management patterns
+- **glTF Asset Loading**: `Graphics.WebGPU.GLTF` parses glTF 2.0 meshes (POSITION/NORMAL/UV + indices) for quick visualization or tooling.
 
 ## Quick Start
 
@@ -67,30 +68,18 @@ main = withContext $ \ctx -> do
 
 ## Examples
 
-The package includes several examples demonstrating different use cases:
+The repo ships with Cabal executables under `examples-package/examples.cabal`. The most common ones:
 
-### GPU Computing Examples
+| Example | Command | Notes |
+|---------|---------|-------|
+| `hello-gpu` | `cabal run hello-gpu` | Sanity-check tensor upload/download |
+| `vector-add` | `cabal run vector-add` | Simple compute kernel |
+| `matmul-subgroup` | `cabal run matmul-subgroup` | Heavier compute demo (needs `clock`) |
+| `triangle-gui` | `cabal run triangle-gui -fglfw` | Minimal GLFW render loop |
+| `tetris-gui` | `cabal run tetris-gui -fglfw` | Interactive Tetris written in Haskell/WebGPU |
+| `gltf-viewer` | `cabal run gltf-viewer -fglfw -- examples/assets/triangle.gltf` | Loads meshes through `Graphics.WebGPU.GLTF` and renders them |
 
-- **VectorAdd.hs**: Basic element-wise vector addition
-- **MatrixMultiply.hs**: Optimized matrix multiplication with performance comparison
-- **Convolution.hs**: 2D image convolution with various filters (blur, edge detection, sharpen)
-
-### Graphics Examples
-
-- **Triangle.hs**: Basic triangle rendering with vertex colors
-- **TexturedQuad.hs**: Texture mapping with transformation matrices
-- **Cube3D.hs**: 3D rendering with Phong lighting model
-
-### Hybrid Examples
-
-- **ParticleSimulation.hs**: Physics simulation using compute shaders with graphical rendering
-
-Run examples with:
-
-```bash
-cd examples/compute
-cabal run VectorAdd
-```
+Graphics demos require the `glfw` Cabal flag (`-fglfw`) and present a Metal/Vulkan/D3D12 window using GLFW. The `gltf-viewer` accepts an optional path to any glTF file (buffers via file URI or data URI) and defaults to the included `examples/assets/triangle.gltf`.
 
 ## API Overview
 
