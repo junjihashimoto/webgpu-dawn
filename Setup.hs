@@ -199,7 +199,7 @@ downloadDawnCache dest glfwEnabled = do
   dawnVersion <- getDawnVersion
   let githubRepo = "junjihashimoto/webgpu-dawn"
       -- Use a release tag that matches the Dawn commit
-      releaseTag = "v0.1.0"  -- Update this to match your release
+      releaseTag = "v0.1.1"  -- Update this to match your release
       archiveName = "dawn-" ++ dawnVersion ++ "-" ++ platformTag ++ ".tar.gz"
       downloadUrl = "https://github.com/" ++ githubRepo ++ "/releases/download/" ++ releaseTag ++ "/" ++ archiveName
       checksumUrl = downloadUrl ++ ".sha256"

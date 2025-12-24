@@ -143,7 +143,7 @@ Dawn binaries are automatically downloaded from GitHub releases for faster insta
 To upload your own Dawn cache (for CI or custom builds):
 
 ```bash
-./scripts/upload-dawn-cache.sh v0.1.0
+./scripts/upload-dawn-cache.sh v0.1.1
 ```
 
 ### Environment Variables
