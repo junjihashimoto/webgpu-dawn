@@ -37,46 +37,58 @@ module Graphics.WebGPU.Dawn.ContT
 import Control.Monad.Trans.Cont (ContT(..), evalContT)
 import Control.Monad.Trans.Class (lift)
 import Control.Monad.IO.Class (liftIO)
+import Control.Exception (bracket)
 import Data.Vector.Storable (Vector, Storable)
 import Graphics.WebGPU.Dawn.Types
+import qualified Graphics.WebGPU.Dawn.Context as C
 import Graphics.WebGPU.Dawn.Context (WGPUFeatureName(..))
 import qualified Graphics.WebGPU.Dawn.Tensor as T
 import Graphics.WebGPU.Dawn.Tensor (TensorData)
 import qualified Graphics.WebGPU.Dawn.Kernel as K
 import Graphics.WebGPU.Dawn.Kernel (WorkgroupSize(..), defaultWorkgroupSize)
-import qualified Graphics.WebGPU.Dawn.IO as IO
 
 -- | Create a context with automatic cleanup using ContT
 createContext :: ContT r IO Context
-createContext = ContT IO.withContext
+createContext = ContT C.withContext
 
 -- | Create a context with features and automatic cleanup using ContT
 createContextWithFeatures :: [String] -> [WGPUFeatureName] -> ContT r IO Context
-createContextWithFeatures toggles features = ContT $ IO.withContextFeatures toggles features
+createContextWithFeatures toggles features = ContT $ C.withContextFeatures toggles features
 
 -- | Create a tensor with automatic cleanup using ContT
 createTensor :: Context -> Shape -> NumType -> ContT r IO (Tensor dtype)
-createTensor ctx shape dtype = ContT $ IO.withTensor ctx shape dtype
+createTensor ctx shape dtype = ContT $ \k -> bracket
+  (T.createTensor ctx shape dtype)
+  T.destroyTensor
+  k
 
 -- | Create a tensor with data and automatic cleanup using ContT
 createTensorWithData :: forall a r dtype. TensorData a => Context -> Shape -> Vector a -> ContT r IO (Tensor dtype)
-createTensorWithData ctx shape vec = ContT $ \k -> IO.withTensorWithData ctx shape vec k
+createTensorWithData ctx shape vec = ContT $ \k -> bracket
+  (T.createTensorWithData ctx shape vec)
+  T.destroyTensor
+  k
 
 -- | Create a tensor with pre-packed data and explicit NumType with automatic cleanup using ContT
 createTensorWithDataPacked :: forall a r dtype. Storable a => Context -> Shape -> NumType -> Vector a -> ContT r IO (Tensor dtype)
-createTensorWithDataPacked ctx shape dtype vec = ContT $ \k -> do
-  tensor <- T.createTensorWithDataPacked ctx shape dtype vec
-  result <- k tensor
-  T.destroyTensor tensor
-  return result
+createTensorWithDataPacked ctx shape dtype vec = ContT $ \k -> bracket
+  (T.createTensorWithDataPacked ctx shape dtype vec)
+  T.destroyTensor
+  k
 
 -- | Create kernel code with automatic cleanup using ContT
 createKernelCode :: String -> ContT r IO KernelCode
-createKernelCode wgslSource = ContT $ IO.withKernelCode wgslSource
+createKernelCode wgslSource = ContT $ \k -> bracket
+  (K.createKernelCode wgslSource)
+  K.destroyKernelCode
+  k
 
 -- | Compile a kernel with automatic cleanup using ContT
 createKernel :: Context -> KernelCode -> [Tensor dtype] -> WorkgroupSize -> ContT r IO Kernel
-createKernel ctx code tensors wgSize = ContT $ IO.withKernel ctx code tensors wgSize
+createKernel ctx code tensors wgSize = ContT $ \k -> bracket
+  (K.compileKernel ctx code tensors wgSize)
+  K.destroyKernel
+  k
 
 -- | Transfer data from CPU to GPU (re-exported from Tensor module)
 toGPU :: forall a dtype. TensorData a => Context -> Tensor dtype -> Vector a -> IO ()

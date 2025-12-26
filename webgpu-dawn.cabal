@@ -42,13 +42,19 @@ library
     Graphics.WebGPU.Dawn.Context
     Graphics.WebGPU.Dawn.Tensor
     Graphics.WebGPU.Dawn.Kernel
-    Graphics.WebGPU.Dawn.IO
     Graphics.WebGPU.Dawn.ContT
     Graphics.WebGPU.Dawn.Float16
     Graphics.WebGPU.GLTF
+    WGSL.AST
+    WGSL.Monad
+    WGSL.CodeGen
+    WGSL.DSL
+    WGSL.Execute
+    WGSL.Layout
 
   other-modules:
     Graphics.WebGPU.Dawn.Internal
+    WGSL.Optimize
 
   if flag(glfw)
     exposed-modules:
@@ -65,12 +71,14 @@ library
     bytestring >= 0.10 && < 0.13,
     vector >= 0.12 && < 0.14,
     transformers >= 0.5 && < 0.7,
+    mtl >= 2.2 && < 2.4,
     aeson >= 2.0 && < 2.3,
     text >= 1.2 && < 2.1,
     unordered-containers >= 0.2.14 && < 0.3,
     base64-bytestring >= 1.0 && < 1.3,
     binary >= 0.8 && < 0.9,
-    filepath >= 1.4 && < 1.6
+    filepath >= 1.4 && < 1.6,
+    containers >= 0.6 && < 0.8
 
   c-sources:
     cbits/gpu_wrapper.c
@@ -119,6 +127,111 @@ library
 
   if os(linux)
     extra-libraries: stdc++
+
+  ghc-options: -Wall
+
+-- DSL examples (using WGSL.DSL)
+executable matmul-dsl
+  main-is:          MatmulDSL.hs
+  hs-source-dirs:   examples/dsl
+  default-language: Haskell2010
+
+  build-depends:
+    base >= 4.14 && < 5,
+    webgpu-dawn,
+    vector >= 0.12 && < 0.14
+
+  ghc-options: -Wall
+
+executable shared-memory-reduction
+  main-is:          SharedMemoryReduction.hs
+  hs-source-dirs:   examples/dsl
+  default-language: Haskell2010
+
+  build-depends:
+    base >= 4.14 && < 5,
+    webgpu-dawn,
+    vector >= 0.12 && < 0.14
+
+  ghc-options: -Wall
+
+executable matmul-subgroup-dsl
+  main-is:          MatmulSubgroupDSL.hs
+  hs-source-dirs:   examples/dsl
+  default-language: Haskell2010
+
+  build-depends:
+    base >= 4.14 && < 5,
+    webgpu-dawn,
+    vector >= 0.12 && < 0.14,
+    clock >= 0.8 && < 0.9
+
+  ghc-options: -Wall
+
+executable matmul-dsl3
+  main-is:          MatmulDSL3.hs
+  hs-source-dirs:   examples/dsl
+  default-language: Haskell2010
+
+  build-depends:
+    base >= 4.14 && < 5,
+    webgpu-dawn
+
+  ghc-options: -Wall
+
+executable vector-add-dsl
+  main-is:          VectorAddDSL.hs
+  hs-source-dirs:   examples/dsl
+  default-language: Haskell2010
+
+  build-depends:
+    base >= 4.14 && < 5,
+    webgpu-dawn,
+    vector >= 0.12 && < 0.14
+
+  ghc-options: -Wall
+
+executable struct-generics-dsl
+  main-is:          StructGenericsDSL.hs
+  hs-source-dirs:   examples/dsl
+  default-language: Haskell2010
+
+  build-depends:
+    base >= 4.14 && < 5,
+    webgpu-dawn
+
+  ghc-options: -Wall
+
+executable auto-binding-dsl
+  main-is:          AutoBindingDSL.hs
+  hs-source-dirs:   examples/dsl
+  default-language: Haskell2010
+
+  build-depends:
+    base >= 4.14 && < 5,
+    webgpu-dawn
+
+  ghc-options: -Wall
+
+executable named-execution-demo
+  main-is:          NamedExecutionDemo.hs
+  hs-source-dirs:   examples/dsl
+  default-language: Haskell2010
+
+  build-depends:
+    base >= 4.14 && < 5,
+    webgpu-dawn
+
+  ghc-options: -Wall
+
+executable layout-demo
+  main-is:          LayoutDemo.hs
+  hs-source-dirs:   examples/dsl
+  default-language: Haskell2010
+
+  build-depends:
+    base >= 4.14 && < 5,
+    webgpu-dawn
 
   ghc-options: -Wall
 

@@ -1,6 +1,8 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE KindSignatures #-}
+{-# LANGUAGE ExistentialQuantification #-}
+{-# LANGUAGE GADTs #-}
 
 module Graphics.WebGPU.Dawn.Types
   ( -- * Opaque Types
@@ -13,6 +15,7 @@ module Graphics.WebGPU.Dawn.Types
   , NumType(..)
   , GPUException(..)
   , Half(..)
+  , AnyTensor(..)
     -- * Helper Functions
   , numTypeSize
   , shapeSize
@@ -36,6 +39,11 @@ newtype Context = Context I.Context
 -- The type parameter 'dtype' is a phantom type that tracks the data type at compile time
 newtype Tensor (dtype :: NumType) = Tensor I.Tensor
   deriving (Eq)
+
+-- | Existential wrapper for tensors of any dtype
+-- This allows heterogeneous lists of tensors with different types
+-- Example: [AnyTensor tensorF32, AnyTensor tensorI32, AnyTensor tensorU32]
+data AnyTensor = forall dtype. AnyTensor (Tensor dtype)
 
 -- | Half-precision floating point (FP16) represented as Word16
 newtype Half = Half Word16

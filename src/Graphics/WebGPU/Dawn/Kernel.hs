@@ -8,6 +8,7 @@ module Graphics.WebGPU.Dawn.Kernel
     -- * Kernel Compilation
   , Kernel
   , compileKernel
+  , compileKernelHeterogeneous
   , destroyKernel
     -- * Kernel Execution
   , dispatchKernel
@@ -82,6 +83,41 @@ compileKernel (Context ctx) (KernelCode code) tensors wgSize = alloca $ \errPtr 
 
   let tensorPtrs = map (\(Tensor t) -> t) tensors
       numTensors = length tensors
+      WorkgroupSize wx wy wz = wgSize
+
+  kernel <- withArray tensorPtrs $ \tensorArr ->
+    I.c_createKernel
+      ctx
+      code
+      tensorArr
+      (fromIntegral numTensors)
+      (fromIntegral wx)
+      (fromIntegral wy)
+      (fromIntegral wz)
+      nullPtr      -- cache_key: nullptr enables auto-generation in C++
+      errPtr
+
+  checkError errPtr
+
+  if kernel == nullPtr
+    then throwIO $ CompilationError "Failed to compile kernel"
+    else return $ Kernel kernel
+
+-- | Compile a kernel with heterogeneous tensors (different dtypes)
+-- This allows mixing F32, I32, U32, etc. tensors in the same kernel
+-- This is the safe version that should be used with executeShaderNamed
+compileKernelHeterogeneous
+  :: Context
+  -> KernelCode
+  -> [AnyTensor]              -- ^ Input/output tensors with potentially different dtypes
+  -> WorkgroupSize
+  -> IO Kernel
+compileKernelHeterogeneous (Context ctx) (KernelCode code) anyTensors wgSize = alloca $ \errPtr -> do
+  poke errPtr (I.GPUError 0 nullPtr)
+
+  -- Extract internal tensor pointers from existential wrappers
+  let tensorPtrs = map (\(AnyTensor (Tensor t)) -> t) anyTensors
+      numTensors = length anyTensors
       WorkgroupSize wx wy wz = wgSize
 
   kernel <- withArray tensorPtrs $ \tensorArr ->
