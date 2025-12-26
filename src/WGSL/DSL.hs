@@ -16,10 +16,15 @@ module WGSL.DSL
   , lit
   , litF32
   , litI32
+  , litU32
+  , litF16
   , litBool
   , (!), (.!)  -- Array indexing
   , vecX, vecY, vecZ  -- Vector accessors
   , fromInteger, fromRational
+
+    -- * Type-cast helpers
+  , i32, u32, f32, f16
 
     -- * Type classes for operator overloading
   , Eq'(..), Ord'(..)
@@ -70,10 +75,35 @@ instance P.Num (Exp I32) where
   signum x = Var "signum_not_implemented"  -- Placeholder
   fromInteger n = LitI32 (P.fromInteger n)
 
+-- | Numeric operations for U32
+instance P.Num (Exp U32) where
+  (+) = Add
+  (-) = Sub
+  (*) = Mul
+  negate x = Var "negate_not_supported_for_u32"  -- U32 is unsigned
+  abs x = x  -- U32 is always non-negative
+  signum x = Var "signum_not_implemented"  -- Placeholder
+  fromInteger n = LitU32 (P.fromInteger n)
+
+-- | Numeric operations for F16
+instance P.Num (Exp F16) where
+  (+) = Add
+  (-) = Sub
+  (*) = Mul
+  negate = Neg
+  abs = Abs
+  signum x = Var "signum_not_implemented"  -- Placeholder
+  fromInteger n = LitF16 (P.fromInteger n)
+
 -- | Fractional for F32
 instance P.Fractional (Exp F32) where
   (/) = Div
   fromRational r = LitF32 (P.fromRational r)
+
+-- | Fractional for F16
+instance P.Fractional (Exp F16) where
+  (/) = Div
+  fromRational r = LitF16 (P.fromRational r)
 
 -- | Equality and comparison
 class Eq' a where
@@ -90,6 +120,9 @@ instance Eq' (Exp I32) where
 instance Eq' (Exp U32) where
   (==) = Eq
 
+instance Eq' (Exp F16) where
+  (==) = Eq
+
 class Ord' a where
   (<) :: a -> a -> Exp Bool_
   (<=) :: a -> a -> Exp Bool_
@@ -103,6 +136,18 @@ instance Ord' (Exp F32) where
   (>=) = Ge
 
 instance Ord' (Exp I32) where
+  (<) = Lt
+  (<=) = Le
+  (>) = Gt
+  (>=) = Ge
+
+instance Ord' (Exp U32) where
+  (<) = Lt
+  (<=) = Le
+  (>) = Gt
+  (>=) = Ge
+
+instance Ord' (Exp F16) where
   (<) = Lt
   (<=) = Le
   (>) = Gt
@@ -128,8 +173,32 @@ litF32 = LitF32
 litI32 :: Int -> Exp I32
 litI32 = LitI32
 
+litU32 :: Int -> Exp U32
+litU32 n = LitU32 (P.fromIntegral n)
+
+litF16 :: Float -> Exp F16
+litF16 = LitF16
+
 litBool :: Bool -> Exp Bool_
 litBool = LitBool
+
+-- | Type-cast helper functions for natural syntax
+-- Note: These work on literal values. For runtime conversion, use explicit constructors.
+i32 :: Exp U32 -> Exp I32
+i32 (LitU32 n) = LitI32 (P.fromIntegral n)
+i32 e = U32ToI32 e  -- For runtime expressions
+
+u32 :: Exp I32 -> Exp U32
+u32 (LitI32 n) = LitU32 (P.fromIntegral n)
+u32 e = I32ToU32 e  -- For runtime expressions
+
+-- | Convert literal integers to F32
+f32 :: Int -> Exp F32
+f32 = LitF32 P.. P.fromIntegral
+
+-- | Convert literal integers to F16
+f16 :: Int -> Exp F16
+f16 = LitF16 P.. P.fromIntegral
 
 -- | Array indexing operator
 (!) :: Exp (Array n a) -> Exp I32 -> Exp a

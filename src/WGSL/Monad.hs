@@ -24,6 +24,7 @@ module WGSL.Monad
   , while_
   , for_
   , forStep_
+  , loop  -- HOAS-style loop
 
   -- Synchronization
   , barrier
@@ -58,6 +59,14 @@ module WGSL.Monad
   , writeView1D
   , writeView2D
   , writeView3D
+
+  -- Typed matrix views (HOAS-style, prevents index swapping)
+  , RowIndex(..)
+  , ColIndex(..)
+  , MatrixView
+  , makeMatrixView
+  , at
+  , writeAt
 
   -- Subgroup Matrix Operations
   , subgroupMatrixLoad
@@ -196,6 +205,14 @@ forStep_ varName start end step body = do
   (_, bodyStmts) <- captureStatements body
   emitStmt $ For varName start end (Just step) bodyStmts
 
+-- | HOAS-style loop: no string variable names, pass loop variable as Exp I32
+-- Usage: loop start end step $ \i -> do { ... use i ... }
+loop :: Exp I32 -> Exp I32 -> Exp I32 -> (Exp I32 -> ShaderM ()) -> ShaderM ()
+loop start end step bodyFn = do
+  varName <- freshVar "i"
+  (_, bodyStmts) <- captureStatements (bodyFn (Var varName))
+  emitStmt $ For varName start end (Just step) bodyStmts
+
 -- | Workgroup barrier (synchronization)
 barrier :: ShaderM ()
 barrier = emitStmt Barrier
@@ -233,6 +250,48 @@ readBuffer ptr idx = return $ PtrIndex ptr idx
 writeBuffer :: Ptr Storage (Array n a) -> Exp I32 -> Exp a -> ShaderM ()
 writeBuffer (Ptr name) idx value =
   emitStmt $ Assign (name ++ "[" ++ show idx ++ "]") (SomeExp value)
+
+-- ============================================================================
+-- Typed Matrix Views (HOAS-style, type-safe row/column indexing)
+-- ============================================================================
+
+-- | Type-safe row index wrapper (prevents swapping with column index)
+newtype RowIndex = Row (Exp I32)
+
+-- | Type-safe column index wrapper (prevents swapping with row index)
+newtype ColIndex = Col (Exp I32)
+
+-- | Matrix view with typed indices
+-- This prevents accidentally swapping row and column indices
+data MatrixView space n a = MatrixView
+  { mvPtr    :: Ptr space (Array n a)
+  , mvRows   :: Int
+  , mvCols   :: Int
+  , mvStride :: Int  -- Row stride (usually = cols for row-major)
+  }
+
+-- | Create a typed matrix view
+-- Usage: matView <- makeMatrixView ptrA rows cols
+makeMatrixView :: Ptr space (Array n a) -> Int -> Int -> MatrixView space n a
+makeMatrixView ptr rows cols = MatrixView ptr rows cols cols
+
+-- | Safe accessor with typed indices - PREVENTS row/column swapping
+-- Usage: value <- matView `at` (Row i, Col j)
+at :: MatrixView Storage n a -> (RowIndex, ColIndex) -> ShaderM (Exp a)
+at (MatrixView ptr _ _ stride) (Row row, Col col) = do
+  let offset = row `Mul` LitI32 stride `Add` col
+  return $ PtrIndex ptr offset
+
+-- | Safe write with typed indices
+-- Usage: matView `writeAt` (Row i, Col j) $ value
+writeAt :: MatrixView Storage n a -> (RowIndex, ColIndex) -> Exp a -> ShaderM ()
+writeAt (MatrixView (Ptr name) _ _ stride) (Row row, Col col) value = do
+  let offset = row `Mul` LitI32 stride `Add` col
+  emitStmt $ Assign (name ++ "[" ++ show offset ++ "]") (SomeExp value)
+
+-- ============================================================================
+-- Subgroup Matrix Operations
+-- ============================================================================
 
 -- | Load data from buffer into subgroup matrix
 subgroupMatrixLoad :: TypeRep           -- ^ Subgroup matrix type (TSubgroupMatrixLeft/Right)

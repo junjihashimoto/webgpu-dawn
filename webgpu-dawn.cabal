@@ -131,18 +131,6 @@ library
   ghc-options: -Wall
 
 -- DSL examples (using WGSL.DSL)
-executable matmul-dsl
-  main-is:          MatmulDSL.hs
-  hs-source-dirs:   examples/dsl
-  default-language: Haskell2010
-
-  build-depends:
-    base >= 4.14 && < 5,
-    webgpu-dawn,
-    vector >= 0.12 && < 0.14
-
-  ghc-options: -Wall
-
 executable shared-memory-reduction
   main-is:          SharedMemoryReduction.hs
   hs-source-dirs:   examples/dsl
@@ -168,17 +156,6 @@ executable matmul-subgroup-dsl
 
   ghc-options: -Wall
 
-executable matmul-dsl3
-  main-is:          MatmulDSL3.hs
-  hs-source-dirs:   examples/dsl
-  default-language: Haskell2010
-
-  build-depends:
-    base >= 4.14 && < 5,
-    webgpu-dawn
-
-  ghc-options: -Wall
-
 executable vector-add-dsl
   main-is:          VectorAddDSL.hs
   hs-source-dirs:   examples/dsl
@@ -193,28 +170,6 @@ executable vector-add-dsl
 
 executable struct-generics-dsl
   main-is:          StructGenericsDSL.hs
-  hs-source-dirs:   examples/dsl
-  default-language: Haskell2010
-
-  build-depends:
-    base >= 4.14 && < 5,
-    webgpu-dawn
-
-  ghc-options: -Wall
-
-executable auto-binding-dsl
-  main-is:          AutoBindingDSL.hs
-  hs-source-dirs:   examples/dsl
-  default-language: Haskell2010
-
-  build-depends:
-    base >= 4.14 && < 5,
-    webgpu-dawn
-
-  ghc-options: -Wall
-
-executable named-execution-demo
-  main-is:          NamedExecutionDemo.hs
   hs-source-dirs:   examples/dsl
   default-language: Haskell2010
 
