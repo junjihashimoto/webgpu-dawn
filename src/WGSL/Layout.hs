@@ -98,6 +98,14 @@ instance WGSLLayout TypeRep where
     -- Struct size computed from field layout
     TStruct _ -> error "Struct size requires field information - use computeStructLayout"
 
+    -- Texture and sampler types (opaque handles, no direct layout)
+    TTexture2D _ -> 0
+    TSampler -> 0
+
+    -- Atomic types (same size as their underlying types)
+    TAtomicI32 -> 4
+    TAtomicU32 -> 4
+
   wgslAlignment mode ty = case ty of
     TF32  -> 4
     TF16  -> 2
@@ -130,6 +138,14 @@ instance WGSLLayout TypeRep where
 
     -- Struct alignment is max of field alignments
     TStruct _ -> error "Struct alignment requires field information - use computeStructLayout"
+
+    -- Texture and sampler types (opaque, no alignment)
+    TTexture2D _ -> 0
+    TSampler -> 0
+
+    -- Atomic types (same alignment as their underlying types)
+    TAtomicI32 -> 4
+    TAtomicU32 -> 4
 
 -- | Compute complete layout for a struct
 -- Returns field layouts with offsets and padding

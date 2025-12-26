@@ -18,7 +18,7 @@ flag glfw
 
 -- Compute examples
 executable hello-gpu
-  main-is:          HelloGPU.hs
+  main-is:          graphics/HelloGPU.hs
   hs-source-dirs:   ../examples
   default-language: Haskell2010
 
@@ -43,7 +43,7 @@ executable vector-add
 
 -- Graphics examples (require GLFW)
 executable triangle-gui
-  main-is:          TriangleGUI.hs
+  main-is:          graphics/TriangleGUI.hs
   hs-source-dirs:   ../examples
   default-language: Haskell2010
 
@@ -58,7 +58,7 @@ executable triangle-gui
     cpp-options: -DENABLE_GLFW
 
 executable tetris-gui
-  main-is:          TetrisGUI.hs
+  main-is:          graphics/TetrisGUI.hs
   hs-source-dirs:   ../examples
   default-language: Haskell2010
 
@@ -76,7 +76,7 @@ executable tetris-gui
     cpp-options: -DENABLE_GLFW
 
 executable gltf-viewer
-  main-is:          GLTFViewer.hs
+  main-is:          graphics/GLTFViewer.hs
   hs-source-dirs:   ../examples
   default-language: Haskell2010
 

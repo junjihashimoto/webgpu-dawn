@@ -50,7 +50,10 @@ library
     WGSL.CodeGen
     WGSL.DSL
     WGSL.Execute
+    WGSL.Kernel
     WGSL.Layout
+    WGSL.Struct
+    WGSL.API
 
   other-modules:
     Graphics.WebGPU.Dawn.Internal
@@ -187,6 +190,42 @@ executable layout-demo
   build-depends:
     base >= 4.14 && < 5,
     webgpu-dawn
+
+  ghc-options: -Wall
+
+executable kernel-fusion
+  main-is:          KernelFusion.hs
+  hs-source-dirs:   examples/dsl
+  default-language: Haskell2010
+
+  build-depends:
+    base >= 4.14 && < 5,
+    webgpu-dawn,
+    vector >= 0.12 && < 0.14
+
+  ghc-options: -Wall
+
+executable particle-system
+  main-is:          ParticleSystem.hs
+  hs-source-dirs:   examples/dsl
+  default-language: Haskell2010
+
+  build-depends:
+    base >= 4.14 && < 5,
+    webgpu-dawn,
+    bytestring >= 0.10 && < 0.13
+
+  ghc-options: -Wall
+
+executable high-level-api
+  main-is:          HighLevelAPI.hs
+  hs-source-dirs:   examples/dsl
+  default-language: Haskell2010
+
+  build-depends:
+    base >= 4.14 && < 5,
+    webgpu-dawn,
+    vector >= 0.12 && < 0.14
 
   ghc-options: -Wall
 

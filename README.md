@@ -1,312 +1,165 @@
 # webgpu-dawn
 
-[![CI](https://github.com/junjihashimoto/webgpu-dawn/workflows/CI/badge.svg)](https://github.com/junjihashimoto/webgpu-dawn/actions)
+High-level Haskell bindings to Google's [Dawn WebGPU](https://dawn.googlesource.com/dawn) implementation.
+This library enables **portable GPU computing** on macOS (Metal), Windows (DirectX 12), and Linux (Vulkan) with a **Production-Ready DSL**.
 
-High-level Haskell bindings to Google's [Dawn WebGPU](https://dawn.googlesource.com/dawn) implementation for GPU computing and graphics programming.
+## 🚀 Quick Start
 
-## Features
+This library features a **Two-Layer Architecture**:
 
-- **Type-safe GPU Computing**: Compile and run WGSL compute shaders with automatic resource management
-- **Graphics Rendering**: Support for vertex/fragment shaders and render pipelines
-- **Automatic Setup**: Dawn is downloaded and built automatically during package installation
-- **Cross-platform**: Supports macOS (Metal), Linux (Vulkan), and Windows (D3D12)
-- **Zero-copy Data Transfer**: Efficient CPU↔GPU data transfer using `vector` and `Storable`
-- **Safe Resource Management**: Automatic cleanup with Haskell's resource management patterns
-- **glTF Asset Loading**: `Graphics.WebGPU.GLTF` parses glTF 2.0 meshes (POSITION/NORMAL/UV + indices) for quick visualization or tooling.
+### 1. High-Level API (Like Accelerate)
 
-## Quick Start
-
-### Installation
-
-```bash
-cabal update
-cabal install webgpu-dawn
-```
-
-**Installation is fast!** Pre-built Dawn binaries are automatically downloaded from GitHub releases (~30 seconds). If the cache is unavailable, Dawn will be built from source (~10-15 minutes on first build).
-
-### Simple Example
+For zero-boilerplate data parallelism. Use this for simple tasks.
 
 ```haskell
-import Graphics.WebGPU.Dawn
+import WGSL.API
 import qualified Data.Vector.Storable as V
 
-main :: IO ()
 main = withContext $ \ctx -> do
-  -- Create GPU tensors
-  let a = V.fromList [1, 2, 3, 4] :: V.Vector Float
-      b = V.fromList [5, 6, 7, 8] :: V.Vector Float
-      shape = Shape [4]
+  -- Transfer data
+  input <- toGPU ctx (V.fromList [1..100] :: V.Vector Float)
+  
+  -- No shader code needed!
+  -- Automatically generates and executes compute kernels
+  result <- gpuMap (\x -> x * 2.0 + 1.0) input
+  
+  -- Get result
+  out <- fromGPU' result
+  print out
 
-  tensorA <- createTensorWithData ctx shape a
-  tensorB <- createTensorWithData ctx shape b
-  tensorC <- createTensor ctx shape F32
-
-  -- Compile shader
-  let shader = unlines
-        [ "@group(0) @binding(0) var<storage, read> a: array<f32>;"
-        , "@group(0) @binding(1) var<storage, read> b: array<f32>;"
-        , "@group(0) @binding(2) var<storage, read_write> c: array<f32>;"
-        , ""
-        , "@compute @workgroup_size(256)"
-        , "fn main(@builtin(global_invocation_id) gid: vec3<u32>) {"
-        , "  c[gid.x] = a[gid.x] + b[gid.x];"
-        , "}"
-        ]
-
-  code <- createKernelCode shader
-  kernel <- compileKernel ctx code [tensorA, tensorB, tensorC]
-                         (WorkgroupSize 1 1 1)
-
-  -- Execute on GPU
-  dispatchKernel ctx kernel
-
-  -- Read results
-  result <- fromGPU ctx tensorC 4
-  print result  -- [6.0, 8.0, 10.0, 12.0]
 ```
 
-## Examples
+### 2. Core DSL (For Performance Tuning)
 
-The repo ships with Cabal executables under `examples-package/examples.cabal`. The most common ones:
-
-| Example | Command | Notes |
-|---------|---------|-------|
-| `hello-gpu` | `cabal run hello-gpu` | Sanity-check tensor upload/download |
-| `vector-add` | `cabal run vector-add` | Simple compute kernel |
-| `matmul-subgroup` | `cabal run matmul-subgroup` | Heavier compute demo (needs `clock`) |
-| `triangle-gui` | `cabal run triangle-gui -fglfw` | Minimal GLFW render loop |
-| `tetris-gui` | `cabal run tetris-gui -fglfw` | Interactive Tetris written in Haskell/WebGPU |
-| `gltf-viewer` | `cabal run gltf-viewer -fglfw -- examples/assets/triangle.gltf` | Loads meshes through `Graphics.WebGPU.GLTF` and renders them |
-
-Graphics demos require the `glfw` Cabal flag (`-fglfw`) and present a Metal/Vulkan/D3D12 window using GLFW. The `gltf-viewer` accepts an optional path to any glTF file (buffers via file URI or data URI) and defaults to the included `examples/assets/triangle.gltf`.
-
-## API Overview
-
-### Context Management
+For explicit control over **Shared Memory**, **Subgroups**, and **F16**. Use this for high-performance algorithms (e.g., LLM inference, Physics).
 
 ```haskell
-withContext :: (Context -> IO a) -> IO a
-createContext :: IO Context
-destroyContext :: Context -> IO ()
+import WGSL.DSL
+
+-- Define Shader Logic
+shader :: ShaderM ()
+shader = do
+  -- Auto-binding: No manual @binding(n) indices needed!
+  input  <- declareInputBuffer "in" (TArray 1024 TF16)
+  output <- declareOutputBuffer "out" (TArray 1024 TF16)
+  
+  -- Natural Math Syntax & HOAS Loops
+  loop 0 1024 1 $ \i -> do
+    val <- readBuffer input i
+    -- Use F16 for 2x performance
+    let res = val * litF16 2.0 + litF16 1.0
+    writeBuffer output i res
+
 ```
 
-### Tensor Operations
+---
+
+## 💎 Key Features
+
+* **🛡️ Type Safety & Safety Mechanisms**
+* **Auto-Binding:** `declareInputBuffer` automatically assigns `@binding(n)` indices.
+* **Named Execution:** `executeShaderNamed` matches buffers by name, preventing runtime order mismatch.
+* **HOAS Loops:** No string-based variables (`loop ... $ \i -> ...`), preventing scope errors.
+
+
+* **⚡ Zero-Overhead Abstractions**
+* **Struct Generation:** `GHC.Generics` derives WGSL structs with correct `std430` padding automatically.
+* **Subgroup Operations:** First-class support for `subgroupMatrixMultiply` (MMA) for matrix multiplication.
+* **Typed Views:** `MatrixView` prevents row/column index swapping bugs.
+
+
+* **🔧 Debugging**
+* **`debugPrint`:** Insert printf-style debugging comments in shaders.
+* **Validation:** Runtime checks for missing or extra buffers.
+
+
+
+---
+
+## 📚 DSL Reference for LLMs/Developers
+
+**Note to AI Coding Assistants:** Please follow the "DO" patterns below for best results.
+
+### ❌ Do NOT do this (Old Style):
 
 ```haskell
--- Create tensors
-createTensor :: Context -> Shape -> NumType -> IO Tensor
-createTensorWithData :: TensorData a => Context -> Shape -> Vector a -> IO Tensor
+-- BAD: String manipulation and unsafe list-based execution
+let src = "var x = " ++ show i ++ ";"
+executeShader ctx src [t1, t2] ... -- Order matters! Dangerous!
 
--- Data transfer
-toGPU :: TensorData a => Context -> Tensor -> Vector a -> IO ()
-fromGPU :: TensorData a => Context -> Tensor -> Int -> IO (Vector a)
-
--- Supported types
-instance TensorData Float
-instance TensorData Double
-instance TensorData Int32
-instance TensorData Word32
 ```
 
-### Kernel Compilation
+### ✅ DO this (New Style):
 
 ```haskell
--- Create and configure shader code
-createKernelCode :: String -> IO KernelCode
-setWorkgroupSize :: KernelCode -> WorkgroupSize -> IO ()
-setEntryPoint :: KernelCode -> String -> IO ()
+-- GOOD: Monadic DSL, Named Execution, and Auto-Binding
+x <- var TF32 (litF32 0.0)
+loop 0 10 1 $ \i -> do ...
 
--- Compile and execute
-compileKernel :: Context -> KernelCode -> [Tensor] -> WorkgroupSize -> IO Kernel
-dispatchKernel :: Context -> Kernel -> IO ()
+-- Safe Execution by Name
+executeShaderNamed ctx shader 
+  [ ("input", AnyTensor t1)
+  , ("output", AnyTensor t2) 
+  ] ...
+
 ```
 
-### Types
+### ✅ Struct Definition (Best Practice):
 
 ```haskell
-data Shape = Shape [Int]
-data NumType = F16 | F32 | F64 | I8 | I16 | I32 | I64 | U8 | U16 | U32 | U64
-data WorkgroupSize = WorkgroupSize { workgroupX, workgroupY, workgroupZ :: Int }
+{-# LANGUAGE DeriveGeneric #-}
+
+data Particle = Particle 
+  { pos :: Vec3 F32
+  , vel :: Vec3 F32 
+  , mass :: F32
+  } deriving (Generic, WGSLStorable)
+
+-- Automatically handles 16-byte alignment for vec3 in std430 layouts!
+
 ```
 
-## Configuration
+---
 
-### Binary Cache
+## 🛠 Project Structure
 
-Dawn binaries are automatically downloaded from GitHub releases for faster installation:
+* **`src/WGSL/API.hs`**: High-level `map`/`reduce` wrappers.
+* **`src/WGSL/DSL.hs`**: Core operators, literals, and builder functions.
+* **`src/WGSL/Struct.hs`**: Generic struct derivation and memory layout logic.
+* **`src/WGSL/Execute.hs`**: Runtime execution and binding logic.
+* **`src/WGSL/Kernel.hs`**: Composable kernel fusion mechanism.
 
-1. **Automatic download**: Setup.hs first tries to download pre-built binaries
-2. **Checksum verification**: SHA256 checksums ensure integrity
-3. **Fallback to source**: If download fails, builds from source automatically
-
-To upload your own Dawn cache (for CI or custom builds):
+## 📦 Installation
 
 ```bash
-./scripts/upload-dawn-cache.sh v0.1.1
-```
-
-### Environment Variables
-
-- `DAWN_HOME`: Custom installation directory (default: `~/.cache/dawn`)
-- `DAWN_VERSION`: Specific Dawn commit to use (default: tested commit)
-- `DAWN_SKIP_BUILD`: Skip building Dawn entirely (assumes system installation)
-- `DAWN_BUILD_FROM_SOURCE`: Set to `1` to force building from source, skip cache download
-- `DAWN_USE_GIT`: Set to `1` to use git clone instead of tarball download when building from source (default: tarball download, no git required)
-
-**Installation modes:**
-
-```bash
-# Default: Try cache download, fallback to source build if unavailable
 cabal install webgpu-dawn
 
-# Force build from source (skip cache):
-DAWN_BUILD_FROM_SOURCE=1 cabal install webgpu-dawn
-
-# Use system-installed Dawn:
-DAWN_SKIP_BUILD=1 cabal install webgpu-dawn
 ```
 
-### Platform Support
+*(Pre-built Dawn binaries are downloaded automatically during installation)*
 
-| Platform | Backend | Status |
-|----------|---------|--------|
-| macOS (Apple Silicon) | Metal | ✅ Supported |
-| macOS (Intel) | Metal | ✅ Supported |
-| Linux (x86_64) | Vulkan | ✅ Supported |
-| Windows | D3D12 | 🚧 Experimental |
-
-## Architecture
-
-```
-webgpu-dawn
-├── Setup.hs                  # Custom Cabal setup (downloads/builds Dawn)
-├── cbits/
-│   ├── gpu_wrapper.h         # C API header
-│   ├── gpu_wrapper.c         # C helper functions
-│   └── gpu_cpp_bridge.cpp    # C++ wrapper around gpu.cpp
-├── src/Graphics/WebGPU/Dawn/
-│   ├── Internal.hs           # Low-level FFI bindings
-│   ├── Types.hs              # Type definitions
-│   ├── Context.hs            # Context management
-│   ├── Tensor.hs             # Tensor operations
-│   └── Kernel.hs             # Kernel compilation/execution
-└── examples/                 # Example programs
-```
-
-## Dependencies
-
-### Build Dependencies
-
-- CMake 3.14+
-- Git
-- C++17 compiler (clang++/g++/MSVC)
-- Platform-specific:
-  - macOS: Xcode Command Line Tools
-  - Linux: Vulkan drivers (`libvulkan1`, `mesa-vulkan-drivers`)
-  - Windows: Visual Studio 2019+
-
-### Runtime Dependencies
-
-None! The Dawn shared library is bundled with the package.
-
-## Troubleshooting
-
-### Dawn Build Fails
-
-```bash
-# Clean and rebuild
-rm -rf ~/.cache/dawn
-cabal clean
-cabal configure
-cabal build
-```
-
-### Linker Errors on macOS
-
-The package automatically adds `-ld_classic` for macOS. If you still see errors:
-
-```bash
-export DAWN_SKIP_BUILD=1
-# Install Dawn manually and ensure it's in your library path
-```
-
-### GPU Not Found
-
-Ensure your system has compatible GPU drivers:
-
-```bash
-# Linux
-sudo apt install vulkan-tools
-vulkaninfo
-
-# macOS
-system_profiler SPDisplaysDataType
-```
-
-## Performance Tips
-
-1. **Batch Operations**: Compile kernels once, dispatch multiple times
-2. **Minimize Transfers**: Keep data on GPU when possible
-3. **Workgroup Size**: Tune for your GPU (typically multiples of 32/64)
-4. **Shared Memory**: Use workgroup-local storage for tiled algorithms
-
-## Contributing
-
-Contributions are welcome! Areas for improvement:
-
-- [ ] Graphics pipeline API (render passes, vertex buffers)
-- [ ] Texture and sampler support
-- [ ] Async compute operations
-- [ ] Window integration (GLFW/SDL bindings)
-- [ ] More numeric types (F16 support)
-- [ ] Profiling and debugging tools
+---
 
 ## License
 
-MIT License - see LICENSE file for details.
+MIT License - see [LICENSE](https://www.google.com/search?q=LICENSE) file for details.
 
 ## Acknowledgments
 
 This project builds upon and includes code from several open-source projects:
 
-### Dawn (Google)
-- **Project**: [Dawn - Chrome's WebGPU implementation](https://dawn.googlesource.com/dawn)
-- **License**: BSD 3-Clause License
-- **Usage**: Core WebGPU runtime, automatically downloaded and built during installation
-- **Copyright**: Copyright 2017-2024 The Dawn & Tint Authors
-
-### gpu.cpp (Answer.AI)
-- **Project**: [gpu.cpp - Minimal GPU compute library](https://github.com/AnswerDotAI/gpu.cpp)
-- **License**: Apache License 2.0
-- **Usage**: High-level C++ API wrapper included in `cbits/gpu.hpp`
-- **Copyright**: Copyright (c) 2024 Answer.AI
-- **Note**: This project uses gpu.hpp to provide a simplified interface to Dawn's native APIs
-
-### GLFW (Optional)
-- **Project**: [GLFW - Multi-platform library for OpenGL/Vulkan](https://github.com/glfw/glfw)
-- **License**: zlib/libpng License
-- **Usage**: Window management for graphics examples (when built with `-fglfw` flag)
-- **Copyright**: Copyright (c) 2002-2006 Marcus Geelnard, Copyright (c) 2006-2019 Camilla Löwy
-
-### WebGPU Specification
-- **Project**: [WebGPU W3C Specification](https://www.w3.org/TR/webgpu/)
-- **License**: W3C Software and Document License
-- **Usage**: API design follows the WebGPU standard
+* **Dawn (Google):** Core WebGPU runtime.
+* **gpu.cpp (Answer.AI):** High-level C++ API wrapper.
+* **GLFW:** Window management for graphics examples.
+* **WebGPU Specification:** W3C Standard.
 
 See `cbits/THIRD_PARTY_LICENSES.md` for complete license texts.
 
-### Special Thanks
-- The Dawn team at Google for creating an excellent WebGPU implementation
-- Answer.AI for developing gpu.cpp and providing a clean C++ API
-- The WebGPU community for developing the specification
-
 ## Links
 
-- [Documentation](https://hackage.haskell.org/package/webgpu-dawn)
-- [Issue Tracker](https://github.com/yourusername/webgpu-dawn/issues)
-- [WebGPU Shading Language Spec](https://www.w3.org/TR/WGSL/)
+* [Documentation (Hackage)](https://hackage.haskell.org/package/webgpu-dawn)
+* [WebGPU Shading Language Spec](https://www.w3.org/TR/WGSL/)
 
 ## Contact
 
-Maintainer: Junji Hashimoto <junji.hashimoto@gmail.com>
+Maintainer: Junji Hashimoto [junji.hashimoto@gmail.com](mailto:junji.hashimoto@gmail.com)

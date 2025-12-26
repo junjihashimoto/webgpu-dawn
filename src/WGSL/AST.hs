@@ -22,6 +22,11 @@ data I32
 data U32
 data Bool_  -- Distinct from Haskell Bool
 
+-- | Atomic types (for atomic operations)
+-- These are distinct from I32/U32 to prevent use in regular arithmetic
+data AtomicI32
+data AtomicU32
+
 data Vec2 a
 data Vec3 a
 data Vec4 a
@@ -31,6 +36,11 @@ data Array (n :: Nat) a
 -- | Struct type - phantom type representing a user-defined struct
 -- The parameter 'a' is the Haskell type that corresponds to the WGSL struct
 data Struct a
+
+-- | Texture types (for texture sampling and storage)
+-- The format parameter tracks the texture format (e.g., rgba8unorm, f32, etc.)
+data Texture2D format
+data Sampler  -- Texture sampler configuration
 
 -- | Multi-dimensional views for safe array indexing
 -- These are logical views over 1D storage buffers
@@ -130,6 +140,49 @@ data Exp a where
   SubgroupMatrixLoad :: TypeRep -> Ptr s a -> Exp U32 -> Exp Bool_ -> Exp U32 -> Exp b
   SubgroupMatrixMultiplyAccumulate :: Exp a -> Exp b -> Exp c -> Exp c
 
+  -- Texture Operations
+  -- Sample texture with sampler at UV coordinates (normalized 0.0-1.0)
+  -- Returns vec4<f32> containing RGBA values
+  TextureSample :: Exp (Texture2D format) -> Exp Sampler -> Exp (Vec2 F32) -> Exp (Vec4 F32)
+
+  -- Load raw texel data at pixel coordinates and mip level
+  -- Returns vec4<f32> containing RGBA values
+  TextureLoad :: Exp (Texture2D format) -> Exp (Vec2 I32) -> Exp I32 -> Exp (Vec4 F32)
+
+  -- Store texel data at pixel coordinates (for storage textures)
+  -- This is a statement-level operation, not an expression
+
+  -- Atomic Operations
+  -- All atomic operations return the OLD value before the operation
+  -- The pointer must point to AtomicI32 or AtomicU32, not regular I32/U32
+
+  -- Atomically add value to location, returns old value
+  AtomicAdd :: Ptr space AtomicI32 -> Exp I32 -> Exp I32
+  AtomicAddU :: Ptr space AtomicU32 -> Exp U32 -> Exp U32
+
+  -- Atomically subtract value from location, returns old value
+  AtomicSub :: Ptr space AtomicI32 -> Exp I32 -> Exp I32
+  AtomicSubU :: Ptr space AtomicU32 -> Exp U32 -> Exp U32
+
+  -- Atomically compute minimum, returns old value
+  AtomicMin :: Ptr space AtomicI32 -> Exp I32 -> Exp I32
+  AtomicMinU :: Ptr space AtomicU32 -> Exp U32 -> Exp U32
+
+  -- Atomically compute maximum, returns old value
+  AtomicMax :: Ptr space AtomicI32 -> Exp I32 -> Exp I32
+  AtomicMaxU :: Ptr space AtomicU32 -> Exp U32 -> Exp U32
+
+  -- Atomically exchange (swap) values, returns old value
+  AtomicExchange :: Ptr space AtomicI32 -> Exp I32 -> Exp I32
+  AtomicExchangeU :: Ptr space AtomicU32 -> Exp U32 -> Exp U32
+
+  -- Atomically compare and exchange weak
+  -- Returns a record with old value and bool indicating success
+  -- In WGSL: __atomic_compare_exchange_weak(&ptr, &comparand, value)
+  -- For simplicity in DSL, we return the old value only
+  AtomicCompareExchangeWeak :: Ptr space AtomicI32 -> Exp I32 -> Exp I32 -> Exp I32
+  AtomicCompareExchangeWeakU :: Ptr space AtomicU32 -> Exp U32 -> Exp U32 -> Exp U32
+
 deriving instance Show (Exp a)
 
 -- | Statements (Imperative Actions)
@@ -151,6 +204,10 @@ data Stmt where
 
   -- Subgroup Matrix Store
   SubgroupMatrixStore :: Ptr s a -> Exp U32 -> Exp b -> Exp Bool_ -> Exp U32 -> Stmt
+
+  -- Texture Store (for storage textures)
+  -- Stores vec4<f32> value at pixel coordinates
+  TextureStore :: Exp (Texture2D format) -> Exp (Vec2 I32) -> Exp (Vec4 F32) -> Stmt
 
   -- Return
   Return :: ExpSome -> Stmt
@@ -185,6 +242,10 @@ data TypeRep
   | TSubgroupMatrixRight TypeRep Int Int   -- precision, m, n
   | TSubgroupMatrixResult TypeRep Int Int  -- precision, m, n
   | TStruct String  -- Struct name (references a struct definition)
+  | TTexture2D String  -- Texture format (e.g., "rgba8unorm", "f32")
+  | TSampler  -- Texture sampler
+  | TAtomicI32  -- Atomic integer (for atomic operations)
+  | TAtomicU32  -- Atomic unsigned integer (for atomic operations)
   deriving (Show, Eq)
 
 data MemorySpace

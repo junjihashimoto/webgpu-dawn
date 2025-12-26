@@ -21,6 +21,7 @@ module WGSL.DSL
   , litBool
   , (!), (.!)  -- Array indexing
   , vecX, vecY, vecZ  -- Vector accessors
+  , (^.)  -- Struct field access
   , fromInteger, fromRational
 
     -- * Type-cast helpers
@@ -28,6 +29,19 @@ module WGSL.DSL
 
     -- * Type classes for operator overloading
   , Eq'(..), Ord'(..)
+
+    -- * Texture operations
+  , textureSample
+  , textureLoad
+  , textureStore_
+
+    -- * Atomic operations
+  , atomicAdd, atomicAddU
+  , atomicSub, atomicSubU
+  , atomicMin, atomicMinU
+  , atomicMax, atomicMaxU
+  , atomicExchange, atomicExchangeU
+  , atomicCompareExchangeWeak, atomicCompareExchangeWeakU
 
     -- * Builder functions (formerly in WGSL.Builder)
   , computeShader
@@ -218,12 +232,119 @@ vecY = VecY
 vecZ :: Exp (Vec3 a) -> Exp a
 vecZ = VecZ
 
+-- | Struct field access operator
+-- Usage: structExpr ^. "fieldName"
+(^.) :: Exp (Struct s) -> String -> Exp a
+(^.) = FieldAccess
+
 -- | Numeric literals via fromInteger
 fromInteger :: Integer -> Exp I32
 fromInteger = LitI32 P.. P.fromInteger
 
 fromRational :: Rational -> Exp F32
 fromRational = LitF32 P.. P.fromRational
+
+-- ============================================================================
+-- Texture Operations
+-- ============================================================================
+
+-- | Sample a texture using a sampler at normalized UV coordinates (0.0-1.0)
+-- Returns a vec4<f32> containing RGBA values
+--
+-- Example:
+-- @
+--   color <- textureSample myTexture mySampler (Vec2 u v)
+-- @
+textureSample :: Exp (Texture2D format) -> Exp Sampler -> Exp (Vec2 F32) -> Exp (Vec4 F32)
+textureSample = TextureSample
+
+-- | Load raw texel data at pixel coordinates and mip level
+-- Returns a vec4<f32> containing RGBA values
+--
+-- Example:
+-- @
+--   texel <- textureLoad myTexture (Vec2 x y) 0  -- mip level 0
+-- @
+textureLoad :: Exp (Texture2D format) -> Exp (Vec2 I32) -> Exp I32 -> Exp (Vec4 F32)
+textureLoad = TextureLoad
+
+-- | Store texel data at pixel coordinates (for storage textures)
+-- This is a monadic operation that generates a statement
+--
+-- Example:
+-- @
+--   textureStore_ myTexture (Vec2 x y) (Vec4 r g b a)
+-- @
+textureStore_ :: Exp (Texture2D format) -> Exp (Vec2 I32) -> Exp (Vec4 F32) -> ShaderM ()
+textureStore_ texture coords value = emitStmt $ TextureStore texture coords value
+
+-- ============================================================================
+-- Atomic Operations
+-- ============================================================================
+
+-- | Atomically add a value to a location, returns the OLD value before addition
+--
+-- Example:
+-- @
+--   oldValue <- atomicAdd counterPtr 1  -- Increment counter
+-- @
+atomicAdd :: Ptr space AtomicI32 -> Exp I32 -> ShaderM (Exp I32)
+atomicAdd ptr value = return $ AtomicAdd ptr value
+
+atomicAddU :: Ptr space AtomicU32 -> Exp U32 -> ShaderM (Exp U32)
+atomicAddU ptr value = return $ AtomicAddU ptr value
+
+-- | Atomically subtract a value from a location, returns the OLD value
+atomicSub :: Ptr space AtomicI32 -> Exp I32 -> ShaderM (Exp I32)
+atomicSub ptr value = return $ AtomicSub ptr value
+
+atomicSubU :: Ptr space AtomicU32 -> Exp U32 -> ShaderM (Exp U32)
+atomicSubU ptr value = return $ AtomicSubU ptr value
+
+-- | Atomically compute minimum, returns the OLD value
+--
+-- Example:
+-- @
+--   oldMin <- atomicMin minPtr newValue  -- Track global minimum
+-- @
+atomicMin :: Ptr space AtomicI32 -> Exp I32 -> ShaderM (Exp I32)
+atomicMin ptr value = return $ AtomicMin ptr value
+
+atomicMinU :: Ptr space AtomicU32 -> Exp U32 -> ShaderM (Exp U32)
+atomicMinU ptr value = return $ AtomicMinU ptr value
+
+-- | Atomically compute maximum, returns the OLD value
+atomicMax :: Ptr space AtomicI32 -> Exp I32 -> ShaderM (Exp I32)
+atomicMax ptr value = return $ AtomicMax ptr value
+
+atomicMaxU :: Ptr space AtomicU32 -> Exp U32 -> ShaderM (Exp U32)
+atomicMaxU ptr value = return $ AtomicMaxU ptr value
+
+-- | Atomically exchange (swap) values, returns the OLD value
+--
+-- Example:
+-- @
+--   oldFlag <- atomicExchange flagPtr 1  -- Set flag, get old value
+-- @
+atomicExchange :: Ptr space AtomicI32 -> Exp I32 -> ShaderM (Exp I32)
+atomicExchange ptr value = return $ AtomicExchange ptr value
+
+atomicExchangeU :: Ptr space AtomicU32 -> Exp U32 -> ShaderM (Exp U32)
+atomicExchangeU ptr value = return $ AtomicExchangeU ptr value
+
+-- | Atomically compare and exchange weak
+-- Compares value at ptr with comparand, and if equal, replaces with value
+-- Returns the OLD value before the operation
+--
+-- Example:
+-- @
+--   oldValue <- atomicCompareExchangeWeak lockPtr 0 1  -- Try to acquire lock
+-- @
+atomicCompareExchangeWeak :: Ptr space AtomicI32 -> Exp I32 -> Exp I32 -> ShaderM (Exp I32)
+atomicCompareExchangeWeak ptr comparand value = return $ AtomicCompareExchangeWeak ptr comparand value
+
+atomicCompareExchangeWeakU :: Ptr space AtomicU32 -> Exp U32 -> Exp U32 -> ShaderM (Exp U32)
+atomicCompareExchangeWeakU ptr comparand value = return $ AtomicCompareExchangeWeakU ptr comparand value
 
 -- ============================================================================
 -- Builder Functions (merged from WGSL.Builder)

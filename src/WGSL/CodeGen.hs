@@ -71,6 +71,48 @@ prettyExp expr = case expr of
     "subgroupMatrixMultiplyAccumulate(" ++ prettyExp left ++ ", " ++
     prettyExp right ++ ", " ++ prettyExp acc ++ ")"
 
+  -- Texture Operations
+  TextureSample texture sampler uv ->
+    "textureSample(" ++ prettyExp texture ++ ", " ++ prettyExp sampler ++ ", " ++
+    prettyExp uv ++ ")"
+
+  TextureLoad texture coords mipLevel ->
+    "textureLoad(" ++ prettyExp texture ++ ", " ++ prettyExp coords ++ ", " ++
+    prettyExp mipLevel ++ ")"
+
+  -- Atomic Operations
+  AtomicAdd (Ptr name) value ->
+    "atomicAdd(&" ++ name ++ ", " ++ prettyExp value ++ ")"
+  AtomicAddU (Ptr name) value ->
+    "atomicAdd(&" ++ name ++ ", " ++ prettyExp value ++ ")"
+
+  AtomicSub (Ptr name) value ->
+    "atomicSub(&" ++ name ++ ", " ++ prettyExp value ++ ")"
+  AtomicSubU (Ptr name) value ->
+    "atomicSub(&" ++ name ++ ", " ++ prettyExp value ++ ")"
+
+  AtomicMin (Ptr name) value ->
+    "atomicMin(&" ++ name ++ ", " ++ prettyExp value ++ ")"
+  AtomicMinU (Ptr name) value ->
+    "atomicMin(&" ++ name ++ ", " ++ prettyExp value ++ ")"
+
+  AtomicMax (Ptr name) value ->
+    "atomicMax(&" ++ name ++ ", " ++ prettyExp value ++ ")"
+  AtomicMaxU (Ptr name) value ->
+    "atomicMax(&" ++ name ++ ", " ++ prettyExp value ++ ")"
+
+  AtomicExchange (Ptr name) value ->
+    "atomicExchange(&" ++ name ++ ", " ++ prettyExp value ++ ")"
+  AtomicExchangeU (Ptr name) value ->
+    "atomicExchange(&" ++ name ++ ", " ++ prettyExp value ++ ")"
+
+  AtomicCompareExchangeWeak (Ptr name) comparand value ->
+    "atomicCompareExchangeWeak(&" ++ name ++ ", " ++ prettyExp comparand ++ ", " ++
+    prettyExp value ++ ").old_value"
+  AtomicCompareExchangeWeakU (Ptr name) comparand value ->
+    "atomicCompareExchangeWeak(&" ++ name ++ ", " ++ prettyExp comparand ++ ", " ++
+    prettyExp value ++ ").old_value"
+
 prettyExpSome :: ExpSome -> String
 prettyExpSome (SomeExp e) = prettyExp e
 
@@ -94,6 +136,10 @@ prettyTypeRep ty = case ty of
   TSubgroupMatrixResult precision m n ->
     "subgroup_matrix_result<" ++ prettyTypeRep precision ++ ", " ++ show m ++ ", " ++ show n ++ ">"
   TStruct name -> name  -- Just the struct name
+  TTexture2D format -> "texture_2d<" ++ format ++ ">"
+  TSampler -> "sampler"
+  TAtomicI32 -> "atomic<i32>"
+  TAtomicU32 -> "atomic<u32>"
 
 prettyMemorySpace :: MemorySpace -> String
 prettyMemorySpace MStorage = "storage"
@@ -151,6 +197,10 @@ prettyStmt indent stmt =
       ind ++ "subgroupMatrixStore(&" ++ name ++ ", " ++
       prettyExp offset ++ ", " ++ prettyExp matrix ++ ", " ++
       prettyExp transpose ++ ", " ++ prettyExp stride ++ ");\n"
+
+    TextureStore texture coords value ->
+      ind ++ "textureStore(" ++ prettyExp texture ++ ", " ++
+      prettyExp coords ++ ", " ++ prettyExp value ++ ");\n"
 
     Return expr ->
       ind ++ "return " ++ prettyExpSome expr ++ ";\n"
