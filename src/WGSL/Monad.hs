@@ -1,5 +1,6 @@
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE FlexibleContexts #-}
 
 module WGSL.Monad
   ( ShaderM
@@ -89,6 +90,11 @@ module WGSL.Monad
   , litI
   , litU
 
+  -- Struct field offset helpers
+  , offsetConst
+  , readStructField
+  , writeStructField
+
   -- Debug support
   , debugPrint
   , debugPrintF
@@ -98,6 +104,8 @@ module WGSL.Monad
 
 import WGSL.AST
 import WGSL.CodeGen (prettyTypeRep)
+import qualified WGSL.Struct as Struct
+import GHC.Generics (Generic, Rep)
 import Control.Monad.State
 import Prelude
 import qualified Prelude as P
@@ -534,3 +542,52 @@ declareStorageBuffer name ty space = do
   modify $ \s -> s { declaredBuffers = declaredBuffers s ++ [(name, ty, space)] }
   -- Return a pointer to the buffer
   return $ Ptr name
+
+-- ============================================================================
+-- Struct Field Offset Helpers
+-- ============================================================================
+
+-- | Create a compile-time constant for a struct field's byte offset
+-- This allows shader code to reference field offsets for manual calculations.
+--
+-- Example:
+-- @
+--   data Particle = Particle { pos :: Vec3, vel :: Vec3, m :: Float }
+--   instance WGSLStorable Particle
+--
+--   shader = do
+--     let velOffset = offsetConst (undefined :: Particle) "vel"  -- Returns Exp I32
+--     -- Use velOffset in shader calculations
+-- @
+offsetConst :: (Generic a, Struct.GWGSLStorable (Rep a)) => a -> String -> Exp I32
+offsetConst structProxy fieldName =
+  case Struct.fieldOffsetOf structProxy fieldName of
+    Just offset -> LitI32 offset
+    Nothing -> error $ "Field '" ++ fieldName ++ "' not found in struct"
+
+-- | Read a field from a struct in an array using the (^.) operator
+-- This is a convenience wrapper that combines array indexing with field access.
+--
+-- Example:
+-- @
+--   particles <- declareInputBuffer "particles" (TArray n (TStruct "Particle"))
+--   particle <- readBuffer particles idx
+--   vel <- readStructField particle "vel"
+-- @
+readStructField :: Exp (Struct s) -> String -> ShaderM (Exp a)
+readStructField structExpr fieldName =
+  return $ FieldAccess structExpr fieldName
+
+-- | Write to a field of a struct in an array
+-- For now, this delegates to the normal write mechanism since WGSL
+-- supports direct field assignment: array[i].field = value
+--
+-- Note: WGSL doesn't support partial struct writes through pointers,
+-- so this generates: buffer[idx].fieldName = value
+writeStructField :: Ptr Storage (Array n (Struct s))
+                 -> Exp I32
+                 -> String
+                 -> Exp a
+                 -> ShaderM ()
+writeStructField (Ptr name) idx fieldName value =
+  emitStmt $ Assign (name ++ "[" ++ show idx ++ "]." ++ fieldName) (SomeExp value)

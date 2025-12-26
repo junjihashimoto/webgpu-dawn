@@ -42,12 +42,14 @@ Example:
 module WGSL.Struct
   ( -- * Type Class
     WGSLStorable(..)
+  , GWGSLStorable(..)  -- Internal, but needed for type signatures
 
     -- * Memory Layout
   , Alignment(..)
   , FieldLayout(..)
   , structLayout
   , structSize
+  , fieldOffsetOf
 
     -- * Serialization
   , toWGSLBytes
@@ -257,3 +259,19 @@ structDefinition = wgslStructDef
 -- | Get field name from Selector
 fieldName :: Selector s => S1 s f a -> String
 fieldName = selName
+
+-- | Get the byte offset of a field by name (at compile time)
+-- This allows shader code to reference field offsets for manual calculations.
+--
+-- Example:
+-- @
+--   data Particle = Particle { pos :: Vec3, vel :: Vec3, m :: Float }
+--   instance WGSLStorable Particle
+--
+--   -- Get offset of 'vel' field
+--   velOffset = fieldOffsetOf (undefined :: Particle) "vel"  -- Returns 16
+-- @
+fieldOffsetOf :: (Generic a, GWGSLStorable (Rep a)) => a -> String -> Maybe Int
+fieldOffsetOf x fieldName =
+  let layout = structLayout x
+  in lookup fieldName layout >>= Just . fieldOffset
