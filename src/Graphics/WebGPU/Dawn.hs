@@ -68,6 +68,9 @@ module Graphics.WebGPU.Dawn
   , destroyContext
   , WGPUFeatureName(..)
 
+    -- * Internal API (for advanced usage like profiling)
+  , unsafeUnwrapContext
+
     -- * Tensor Operations
   , Tensor
   , Shape(..)

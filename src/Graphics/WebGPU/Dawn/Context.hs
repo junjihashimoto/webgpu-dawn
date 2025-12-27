@@ -6,8 +6,11 @@ module Graphics.WebGPU.Dawn.Context
   , createContextWithFeatures
   , destroyContext
   , checkError
+  , waitAll
   -- * WebGPU Feature Names
   , WGPUFeatureName(..)
+  -- * Internal API (for advanced usage like profiling)
+  , unsafeUnwrapContext
   ) where
 
 import Control.Exception (bracket, throwIO)
@@ -24,6 +27,7 @@ data WGPUFeatureName
   = FeatureShaderF16                        -- 0x0000000B (11)
   | FeatureSubgroups                        -- 0x00000012 (18)
   | FeatureChromiumExperimentalSubgroupMatrix  -- 0x00050037 (327735)
+  | FeatureTimestampQuery                   -- 0x00000003 (3)
   deriving (Eq, Show)
 
 -- Convert feature to Word32 value
@@ -31,6 +35,7 @@ featureToWord32 :: WGPUFeatureName -> Word32
 featureToWord32 FeatureShaderF16 = 0x0000000B
 featureToWord32 FeatureSubgroups = 0x00000012
 featureToWord32 FeatureChromiumExperimentalSubgroupMatrix = 0x00050037
+featureToWord32 FeatureTimestampQuery = 0x00000003
 
 -- | Create a new GPU context with automatic resource management
 withContext :: (Context -> IO a) -> IO a
@@ -92,3 +97,12 @@ checkError errPtr = do
           throwIO $ GPUError (fromIntegral $ I.errorCode err) "Unknown error"
     else
       return ()
+
+-- | UNSAFE: Extract raw internal context pointer
+-- Only use this for advanced low-level operations like profiling
+unsafeUnwrapContext :: Context -> I.Context
+unsafeUnwrapContext (Context ctx) = ctx
+
+-- | Wait for all pending asynchronous GPU operations to complete
+waitAll :: Context -> IO ()
+waitAll (Context ctx) = I.c_waitAll ctx

@@ -14,6 +14,9 @@ typedef void* GPUTensor;
 typedef void* GPUKernel;
 typedef void* GPUShape;
 typedef void* GPUKernelCode;
+typedef void* GPUQuerySet;
+typedef void* GPUCommandEncoder;
+typedef void* GPUBuffer;
 
 // Numeric types enum matching gpu.hpp
 typedef enum {
@@ -95,6 +98,33 @@ void gpu_end_batch(GPUContext ctx, GPUError* error);
 size_t gpu_size_of_type(GPUNumType dtype);
 const char* gpu_type_name(GPUNumType dtype);
 
+// QuerySet types for timestamp queries
+typedef enum {
+    GPU_QUERY_TYPE_OCCLUSION = 1,
+    GPU_QUERY_TYPE_TIMESTAMP = 2
+} GPUQueryType;
+
+// Timestamp query support
+GPUQuerySet gpu_create_query_set(GPUContext ctx, GPUQueryType type, uint32_t count, GPUError* error);
+void gpu_destroy_query_set(GPUQuerySet querySet);
+
+// Get raw WebGPU handles for advanced usage
+GPUCommandEncoder gpu_get_command_encoder(GPUContext ctx, GPUError* error);
+void gpu_release_command_encoder(GPUCommandEncoder encoder);
+
+// Timestamp query commands (to be called on command encoder)
+void gpu_write_timestamp(GPUCommandEncoder encoder, GPUQuerySet querySet, uint32_t queryIndex);
+void gpu_resolve_query_set(GPUCommandEncoder encoder, GPUQuerySet querySet,
+                           uint32_t firstQuery, uint32_t queryCount,
+                           GPUBuffer destination, uint64_t destinationOffset);
+
+// Create buffer for query results
+GPUBuffer gpu_create_query_buffer(GPUContext ctx, size_t size, GPUError* error);
+void gpu_release_buffer(GPUBuffer buffer);
+
+// Read back query results (blocking)
+void gpu_read_query_buffer(GPUContext ctx, GPUBuffer buffer, uint64_t* data, size_t count, GPUError* error);
+
 // Profiling functions
 void gpu_print_profile_stats(void);
 void gpu_reset_profile_stats(void);
@@ -158,6 +188,24 @@ void gpu_render_pipeline_release(GPURenderPipeline pipeline);
 // Get texture format from surface
 int gpu_surface_get_preferred_format(GPUSurface surface, GPUError* error);
 #endif // ENABLE_GLFW
+
+// Debug Ring Buffer API (for GPU printf)
+typedef void* GPUDebugBuffer;
+
+// Create a debug ring buffer for GPU printf-style debugging
+// bufferSize: size in bytes (e.g., 64KB = 65536)
+GPUDebugBuffer gpu_create_debug_buffer(GPUContext ctx, size_t bufferSize, GPUError* error);
+
+// Destroy debug buffer
+void gpu_destroy_debug_buffer(GPUDebugBuffer debugBuffer);
+
+// Read debug buffer contents after kernel execution
+// Returns number of entries read
+uint32_t gpu_read_debug_buffer(GPUContext ctx, GPUDebugBuffer debugBuffer,
+                                uint32_t* data, size_t maxEntries, GPUError* error);
+
+// Clear debug buffer (reset write position)
+void gpu_clear_debug_buffer(GPUContext ctx, GPUDebugBuffer debugBuffer);
 
 #ifdef __cplusplus
 }

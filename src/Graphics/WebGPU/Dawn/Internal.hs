@@ -7,7 +7,7 @@ module Graphics.WebGPU.Dawn.Internal where
 import Foreign
 import Foreign.C.Types
 import Foreign.C.String
-import Data.Word (Word32)
+import Data.Word (Word32, Word64)
 
 -- Opaque types corresponding to C wrapper
 data Context_
@@ -15,6 +15,9 @@ data Tensor_
 data Kernel_
 data Shape_
 data KernelCode_
+data QuerySet_
+data CommandEncoder_
+data Buffer_
 
 -- Type aliases for opaque pointers
 type Context = Ptr Context_
@@ -22,6 +25,9 @@ type Tensor = Ptr Tensor_
 type Kernel = Ptr Kernel_
 type Shape = Ptr Shape_
 type KernelCode = Ptr KernelCode_
+type QuerySet = Ptr QuerySet_
+type CommandEncoder = Ptr CommandEncoder_
+type Buffer = Ptr Buffer_
 
 -- Error handling structure
 data GPUError = GPUError
@@ -158,3 +164,47 @@ foreign import ccall unsafe "gpu_get_last_error_message"
 
 foreign import ccall unsafe "gpu_clear_error"
   c_clearError :: Ptr GPUError -> IO ()
+
+-- Timestamp query support
+foreign import ccall unsafe "gpu_create_query_set"
+  c_createQuerySet :: Context -> CInt -> Word32 -> Ptr GPUError -> IO QuerySet
+
+foreign import ccall unsafe "gpu_destroy_query_set"
+  c_destroyQuerySet :: QuerySet -> IO ()
+
+foreign import ccall unsafe "gpu_get_command_encoder"
+  c_getCommandEncoder :: Context -> Ptr GPUError -> IO CommandEncoder
+
+foreign import ccall unsafe "gpu_release_command_encoder"
+  c_releaseCommandEncoder :: CommandEncoder -> IO ()
+
+foreign import ccall unsafe "gpu_write_timestamp"
+  c_writeTimestamp :: CommandEncoder -> QuerySet -> Word32 -> IO ()
+
+foreign import ccall unsafe "gpu_resolve_query_set"
+  c_resolveQuerySet :: CommandEncoder -> QuerySet -> Word32 -> Word32 -> Buffer -> Word64 -> IO ()
+
+foreign import ccall unsafe "gpu_create_query_buffer"
+  c_createQueryBuffer :: Context -> CSize -> Ptr GPUError -> IO Buffer
+
+foreign import ccall unsafe "gpu_release_buffer"
+  c_releaseBuffer :: Buffer -> IO ()
+
+foreign import ccall unsafe "gpu_read_query_buffer"
+  c_readQueryBuffer :: Context -> Buffer -> Ptr Word64 -> CSize -> Ptr GPUError -> IO ()
+
+-- Debug Ring Buffer (for GPU printf)
+data DebugBuffer_
+type DebugBuffer = Ptr DebugBuffer_
+
+foreign import ccall unsafe "gpu_create_debug_buffer"
+  c_createDebugBuffer :: Context -> CSize -> Ptr GPUError -> IO DebugBuffer
+
+foreign import ccall unsafe "gpu_destroy_debug_buffer"
+  c_destroyDebugBuffer :: DebugBuffer -> IO ()
+
+foreign import ccall unsafe "gpu_read_debug_buffer"
+  c_readDebugBuffer :: Context -> DebugBuffer -> Ptr Word32 -> CSize -> Ptr GPUError -> IO Word32
+
+foreign import ccall unsafe "gpu_clear_debug_buffer"
+  c_clearDebugBuffer :: Context -> DebugBuffer -> IO ()

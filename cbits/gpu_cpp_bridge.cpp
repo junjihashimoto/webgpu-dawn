@@ -831,4 +831,364 @@ void gpu_end_batch(GPUContext ctx, GPUError* error) {
     }
 }
 
+// ============================================================================
+// Timestamp Query Support
+// ============================================================================
+
+// Create a query set for timestamp queries
+GPUQuerySet gpu_create_query_set(GPUContext ctx, GPUQueryType type, uint32_t count, GPUError* error) {
+    try {
+        CLEAR_ERROR(error);
+        if (!ctx) {
+            SET_ERROR(error, 3, "Invalid context");
+            return nullptr;
+        }
+
+        auto ctx_impl = static_cast<GPUContextImpl*>(ctx);
+
+        WGPUQuerySetDescriptor desc = {};
+        desc.type = (type == GPU_QUERY_TYPE_TIMESTAMP) ? WGPUQueryType_Timestamp : WGPUQueryType_Occlusion;
+        desc.count = count;
+
+        WGPUQuerySet querySet = wgpuDeviceCreateQuerySet(ctx_impl->ctx->device, &desc);
+        if (!querySet) {
+            SET_ERROR(error, 1, "Failed to create query set");
+            return nullptr;
+        }
+
+        return static_cast<GPUQuerySet>(querySet);
+    } catch (const std::exception& e) {
+        SET_ERROR(error, 1, e.what());
+        return nullptr;
+    }
+}
+
+void gpu_destroy_query_set(GPUQuerySet querySet) {
+    if (querySet) {
+        wgpuQuerySetRelease(static_cast<WGPUQuerySet>(querySet));
+    }
+}
+
+// Get command encoder from context
+GPUCommandEncoder gpu_get_command_encoder(GPUContext ctx, GPUError* error) {
+    try {
+        CLEAR_ERROR(error);
+        if (!ctx) {
+            SET_ERROR(error, 3, "Invalid context");
+            return nullptr;
+        }
+
+        auto ctx_impl = static_cast<GPUContextImpl*>(ctx);
+
+        WGPUCommandEncoderDescriptor desc = {};
+        WGPUCommandEncoder encoder = wgpuDeviceCreateCommandEncoder(ctx_impl->ctx->device, &desc);
+
+        if (!encoder) {
+            SET_ERROR(error, 1, "Failed to create command encoder");
+            return nullptr;
+        }
+
+        return static_cast<GPUCommandEncoder>(encoder);
+    } catch (const std::exception& e) {
+        SET_ERROR(error, 1, e.what());
+        return nullptr;
+    }
+}
+
+void gpu_release_command_encoder(GPUCommandEncoder encoder) {
+    if (encoder) {
+        wgpuCommandEncoderRelease(static_cast<WGPUCommandEncoder>(encoder));
+    }
+}
+
+// Write timestamp to query set
+void gpu_write_timestamp(GPUCommandEncoder encoder, GPUQuerySet querySet, uint32_t queryIndex) {
+    if (encoder && querySet) {
+        wgpuCommandEncoderWriteTimestamp(
+            static_cast<WGPUCommandEncoder>(encoder),
+            static_cast<WGPUQuerySet>(querySet),
+            queryIndex
+        );
+    }
+}
+
+// Resolve query set to buffer
+void gpu_resolve_query_set(GPUCommandEncoder encoder, GPUQuerySet querySet,
+                           uint32_t firstQuery, uint32_t queryCount,
+                           GPUBuffer destination, uint64_t destinationOffset) {
+    if (encoder && querySet && destination) {
+        wgpuCommandEncoderResolveQuerySet(
+            static_cast<WGPUCommandEncoder>(encoder),
+            static_cast<WGPUQuerySet>(querySet),
+            firstQuery,
+            queryCount,
+            static_cast<WGPUBuffer>(destination),
+            destinationOffset
+        );
+    }
+}
+
+// Create buffer for query results
+GPUBuffer gpu_create_query_buffer(GPUContext ctx, size_t size, GPUError* error) {
+    try {
+        CLEAR_ERROR(error);
+        if (!ctx) {
+            SET_ERROR(error, 3, "Invalid context");
+            return nullptr;
+        }
+
+        auto ctx_impl = static_cast<GPUContextImpl*>(ctx);
+
+        WGPUBufferDescriptor desc = {};
+        desc.size = size;
+        desc.usage = WGPUBufferUsage_QueryResolve | WGPUBufferUsage_CopySrc;
+        desc.mappedAtCreation = false;
+
+        WGPUBuffer buffer = wgpuDeviceCreateBuffer(ctx_impl->ctx->device, &desc);
+        if (!buffer) {
+            SET_ERROR(error, 1, "Failed to create query buffer");
+            return nullptr;
+        }
+
+        return static_cast<GPUBuffer>(buffer);
+    } catch (const std::exception& e) {
+        SET_ERROR(error, 1, e.what());
+        return nullptr;
+    }
+}
+
+void gpu_release_buffer(GPUBuffer buffer) {
+    if (buffer) {
+        wgpuBufferRelease(static_cast<WGPUBuffer>(buffer));
+    }
+}
+
+// Callback data for buffer mapping
+struct MapCallbackData {
+    bool done = false;
+    WGPUMapAsyncStatus status = WGPUMapAsyncStatus_Error;  // Initial value, will be set by callback
+};
+
+// Read back query results (blocking)
+void gpu_read_query_buffer(GPUContext ctx, GPUBuffer buffer, uint64_t* data, size_t count, GPUError* error) {
+    try {
+        CLEAR_ERROR(error);
+        if (!ctx || !buffer || !data) {
+            SET_ERROR(error, 3, "Invalid parameters");
+            return;
+        }
+
+        auto ctx_impl = static_cast<GPUContextImpl*>(ctx);
+        WGPUBuffer wgpuBuffer = static_cast<WGPUBuffer>(buffer);
+
+        // Create readback buffer
+        size_t bufferSize = count * sizeof(uint64_t);
+        WGPUBufferDescriptor desc = {};
+        desc.size = bufferSize;
+        desc.usage = WGPUBufferUsage_CopyDst | WGPUBufferUsage_MapRead;
+        desc.mappedAtCreation = false;
+
+        WGPUBuffer readbackBuffer = wgpuDeviceCreateBuffer(ctx_impl->ctx->device, &desc);
+        if (!readbackBuffer) {
+            SET_ERROR(error, 1, "Failed to create readback buffer");
+            return;
+        }
+
+        // Copy from query buffer to readback buffer
+        WGPUCommandEncoderDescriptor encDesc = {};
+        WGPUCommandEncoder encoder = wgpuDeviceCreateCommandEncoder(ctx_impl->ctx->device, &encDesc);
+        wgpuCommandEncoderCopyBufferToBuffer(encoder, wgpuBuffer, 0, readbackBuffer, 0, bufferSize);
+        WGPUCommandBuffer commands = wgpuCommandEncoderFinish(encoder, nullptr);
+        wgpuQueueSubmit(ctx_impl->ctx->queue, 1, &commands);
+
+        // Map and read
+        MapCallbackData callbackData;
+        WGPUBufferMapCallbackInfo callbackInfo = {};
+        callbackInfo.mode = WGPUCallbackMode_AllowSpontaneous;
+        callbackInfo.callback = [](WGPUMapAsyncStatus status, WGPUStringView, void* userdata1, void*) {
+            auto* data = static_cast<MapCallbackData*>(userdata1);
+            data->status = status;
+            data->done = true;
+        };
+        callbackInfo.userdata1 = &callbackData;
+
+        wgpuBufferMapAsync(readbackBuffer, WGPUMapMode_Read, 0, bufferSize, callbackInfo);
+
+        // Wait for mapping
+        while (!callbackData.done) {
+            wgpuDeviceTick(ctx_impl->ctx->device);
+        }
+
+        if (callbackData.status != WGPUMapAsyncStatus_Success) {
+            wgpuBufferRelease(readbackBuffer);
+            wgpuCommandBufferRelease(commands);
+            wgpuCommandEncoderRelease(encoder);
+            SET_ERROR(error, 1, "Failed to map buffer");
+            return;
+        }
+
+        // Copy data
+        const uint64_t* mappedData = static_cast<const uint64_t*>(wgpuBufferGetConstMappedRange(readbackBuffer, 0, bufferSize));
+        if (mappedData) {
+            memcpy(data, mappedData, bufferSize);
+        } else {
+            SET_ERROR(error, 1, "Failed to get mapped range");
+        }
+
+        wgpuBufferUnmap(readbackBuffer);
+        wgpuBufferRelease(readbackBuffer);
+        wgpuCommandBufferRelease(commands);
+        wgpuCommandEncoderRelease(encoder);
+
+    } catch (const std::exception& e) {
+        SET_ERROR(error, 1, e.what());
+    }
+}
+
+// ============================================================================
+// Debug Ring Buffer Implementation (for GPU printf)
+// ============================================================================
+
+GPUDebugBuffer gpu_create_debug_buffer(GPUContext ctx, size_t bufferSize, GPUError* error) {
+    auto ctx_impl = static_cast<GPUContextImpl*>(ctx);
+
+    // Create a storage buffer for debug output
+    // Format: [atomic_counter (u32), padding, data entries...]
+    // Each entry: [thread_id (u32), value_count (u32), values...]
+
+    WGPUBufferDescriptor bufferDesc = {};
+    bufferDesc.usage = WGPUBufferUsage_Storage | WGPUBufferUsage_CopySrc | WGPUBufferUsage_CopyDst;
+    bufferDesc.size = bufferSize;
+    bufferDesc.mappedAtCreation = false;
+
+    WGPUBuffer buffer = wgpuDeviceCreateBuffer(ctx_impl->ctx->device, &bufferDesc);
+
+    if (!buffer) {
+        if (error) {
+            error->code = 1;
+            error->message = strdup("Failed to create debug buffer");
+        }
+        return nullptr;
+    }
+
+    // Initialize buffer to zeros (important for atomic counter)
+    WGPUQueue queue = wgpuDeviceGetQueue(ctx_impl->ctx->device);
+    uint32_t zero = 0;
+    wgpuQueueWriteBuffer(queue, buffer, 0, &zero, sizeof(uint32_t));
+
+    return static_cast<GPUDebugBuffer>(buffer);
+}
+
+void gpu_destroy_debug_buffer(GPUDebugBuffer debugBuffer) {
+    if (debugBuffer) {
+        WGPUBuffer buffer = static_cast<WGPUBuffer>(debugBuffer);
+        wgpuBufferRelease(buffer);
+    }
+}
+
+uint32_t gpu_read_debug_buffer(GPUContext ctx, GPUDebugBuffer debugBuffer,
+                                uint32_t* data, size_t maxEntries, GPUError* error) {
+    auto ctx_impl = static_cast<GPUContextImpl*>(ctx);
+    WGPUBuffer debugBuf = static_cast<WGPUBuffer>(debugBuffer);
+
+    // Get buffer size
+    uint64_t bufferSize = wgpuBufferGetSize(debugBuf);
+
+    // Create staging buffer for readback
+    WGPUBufferDescriptor stagingDesc = {};
+    stagingDesc.usage = WGPUBufferUsage_CopyDst | WGPUBufferUsage_MapRead;
+    stagingDesc.size = bufferSize;
+    stagingDesc.mappedAtCreation = false;
+
+    WGPUBuffer stagingBuffer = wgpuDeviceCreateBuffer(ctx_impl->ctx->device, &stagingDesc);
+
+    if (!stagingBuffer) {
+        if (error) {
+            error->code = 1;
+            error->message = strdup("Failed to create staging buffer for debug readback");
+        }
+        return 0;
+    }
+
+    // Copy debug buffer to staging buffer
+    WGPUCommandEncoder encoder = wgpuDeviceCreateCommandEncoder(ctx_impl->ctx->device, nullptr);
+    wgpuCommandEncoderCopyBufferToBuffer(encoder, debugBuf, 0, stagingBuffer, 0, bufferSize);
+
+    WGPUCommandBuffer commandBuffer = wgpuCommandEncoderFinish(encoder, nullptr);
+    WGPUQueue queue = wgpuDeviceGetQueue(ctx_impl->ctx->device);
+    wgpuQueueSubmit(queue, 1, &commandBuffer);
+
+    // Wait for completion
+    wgpuCommandBufferRelease(commandBuffer);
+    wgpuCommandEncoderRelease(encoder);
+
+    // Map buffer for reading
+    struct MapContext {
+        WGPUMapAsyncStatus status;
+        bool done;
+    };
+
+    MapContext mapCtx = { WGPUMapAsyncStatus_Error, false };
+
+    WGPUBufferMapCallbackInfo callbackInfo = {};
+    callbackInfo.mode = WGPUCallbackMode_AllowSpontaneous;
+    callbackInfo.callback = [](WGPUMapAsyncStatus status, WGPUStringView, void* userdata1, void*) {
+        auto ctx = static_cast<MapContext*>(userdata1);
+        ctx->status = status;
+        ctx->done = true;
+    };
+    callbackInfo.userdata1 = &mapCtx;
+
+    wgpuBufferMapAsync(stagingBuffer, WGPUMapMode_Read, 0, bufferSize, callbackInfo);
+
+    // Poll until mapping is complete
+    while (!mapCtx.done) {
+        wgpuDeviceTick(ctx_impl->ctx->device);
+    }
+
+    if (mapCtx.status != WGPUMapAsyncStatus_Success) {
+        wgpuBufferRelease(stagingBuffer);
+        if (error) {
+            error->code = 1;
+            error->message = strdup("Failed to map debug buffer for reading");
+        }
+        return 0;
+    }
+
+    // Read the data
+    const uint32_t* mapped = static_cast<const uint32_t*>(
+        wgpuBufferGetConstMappedRange(stagingBuffer, 0, bufferSize)
+    );
+
+    if (!mapped) {
+        wgpuBufferUnmap(stagingBuffer);
+        wgpuBufferRelease(stagingBuffer);
+        if (error) {
+            error->code = 1;
+            error->message = strdup("Failed to get mapped range for debug buffer");
+        }
+        return 0;
+    }
+
+    // Copy data (limited by maxEntries)
+    size_t entriesToCopy = std::min(maxEntries, static_cast<size_t>(bufferSize / sizeof(uint32_t)));
+    memcpy(data, mapped, entriesToCopy * sizeof(uint32_t));
+
+    // Cleanup
+    wgpuBufferUnmap(stagingBuffer);
+    wgpuBufferRelease(stagingBuffer);
+
+    return static_cast<uint32_t>(entriesToCopy);
+}
+
+void gpu_clear_debug_buffer(GPUContext ctx, GPUDebugBuffer debugBuffer) {
+    auto ctx_impl = static_cast<GPUContextImpl*>(ctx);
+    WGPUBuffer buffer = static_cast<WGPUBuffer>(debugBuffer);
+
+    // Reset atomic counter to 0
+    WGPUQueue queue = wgpuDeviceGetQueue(ctx_impl->ctx->device);
+    uint32_t zero = 0;
+    wgpuQueueWriteBuffer(queue, buffer, 0, &zero, sizeof(uint32_t));
+}
+
 } // extern "C"
