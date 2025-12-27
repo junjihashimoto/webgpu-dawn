@@ -95,6 +95,7 @@ data Exp a where
   Sub :: Exp a -> Exp a -> Exp a
   Mul :: Exp a -> Exp a -> Exp a
   Div :: Exp a -> Exp a -> Exp a
+  Mod :: Exp a -> Exp a -> Exp a  -- Modulo (remainder)
   Neg :: Exp a -> Exp a
 
   -- Comparison
@@ -129,12 +130,28 @@ data Exp a where
   Abs  :: Exp a -> Exp a
   Min  :: Exp a -> Exp a -> Exp a
   Max  :: Exp a -> Exp a -> Exp a
+  Exp  :: Exp F32 -> Exp F32  -- Exponential function
+  Cos  :: Exp a -> Exp a      -- Cosine
+  Sin  :: Exp a -> Exp a      -- Sine
+  Pow  :: Exp a -> Exp a -> Exp a  -- Power (base^exponent)
+  Tanh :: Exp a -> Exp a      -- Hyperbolic tangent
+  Clamp :: Exp a -> Exp a -> Exp a -> Exp a  -- Clamp(x, min, max)
 
   -- Type Conversion
   F32ToI32 :: Exp F32 -> Exp I32
   I32ToF32 :: Exp I32 -> Exp F32
   U32ToI32 :: Exp U32 -> Exp I32
   I32ToU32 :: Exp I32 -> Exp U32
+  F16ToF32 :: Exp F16 -> Exp F32  -- f16 to f32 conversion
+  F32ToF16 :: Exp F32 -> Exp F16  -- f32 to f16 conversion
+  I32ToF16 :: Exp I32 -> Exp F16  -- i32 to f16 conversion
+
+  -- Bitwise Operations (for U32)
+  ShiftLeft  :: Exp U32 -> Exp U32 -> Exp U32  -- a << b
+  ShiftRight :: Exp U32 -> Exp U32 -> Exp U32  -- a >> b
+  BitAnd     :: Exp U32 -> Exp U32 -> Exp U32  -- a & b
+  BitOr      :: Exp U32 -> Exp U32 -> Exp U32  -- a | b
+  BitXor     :: Exp U32 -> Exp U32 -> Exp U32  -- a ^ b
 
   -- Subgroup Matrix Operations
   SubgroupMatrixLoad :: TypeRep -> Ptr s a -> Exp U32 -> Exp Bool_ -> Exp U32 -> Exp b

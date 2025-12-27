@@ -24,8 +24,19 @@ module WGSL.DSL
   , (^.)  -- Struct field access
   , fromInteger, fromRational
 
+    -- * Math functions
+  , sqrt', abs', min', max', exp', cos', sin', pow', tanh', clamp'
+
     -- * Type-cast helpers
   , i32, u32, f32, f16
+
+    -- * Bitwise operations (for U32)
+  , shiftLeft, shiftRight, bitAnd, bitOr, bitXor
+  , (.<<.), (.>>.), (.&.), (.|.), (.^.)  -- Infix operators
+
+    -- * Integer operations
+  , divExp, modExp
+  , (./.), (.%)
 
     -- * Type classes for operator overloading
   , Eq'(..), Ord'(..)
@@ -213,6 +224,81 @@ f32 = LitF32 P.. P.fromIntegral
 -- | Convert literal integers to F16
 f16 :: Int -> Exp F16
 f16 = LitF16 P.. P.fromIntegral
+
+-- ============================================================================
+-- Bitwise Operations
+-- ============================================================================
+
+-- | Bitwise shift left (<<)
+shiftLeft :: Exp U32 -> Exp U32 -> Exp U32
+shiftLeft = ShiftLeft
+
+-- | Bitwise shift right (>>)
+shiftRight :: Exp U32 -> Exp U32 -> Exp U32
+shiftRight = ShiftRight
+
+-- | Bitwise AND (&)
+bitAnd :: Exp U32 -> Exp U32 -> Exp U32
+bitAnd = BitAnd
+
+-- | Bitwise OR (|)
+bitOr :: Exp U32 -> Exp U32 -> Exp U32
+bitOr = BitOr
+
+-- | Bitwise XOR (^)
+bitXor :: Exp U32 -> Exp U32 -> Exp U32
+bitXor = BitXor
+
+-- | Infix operator for shift left
+(.<<.) :: Exp U32 -> Exp U32 -> Exp U32
+(.<<.) = ShiftLeft
+infixl 8 .<<.
+
+-- | Infix operator for shift right
+(.>>.) :: Exp U32 -> Exp U32 -> Exp U32
+(.>>.) = ShiftRight
+infixl 8 .>>.
+
+-- | Infix operator for bitwise AND
+(.&.) :: Exp U32 -> Exp U32 -> Exp U32
+(.&.) = BitAnd
+infixl 7 .&.
+
+-- | Infix operator for bitwise OR
+(.|.) :: Exp U32 -> Exp U32 -> Exp U32
+(.|.) = BitOr
+infixl 5 .|.
+
+-- | Infix operator for bitwise XOR
+(.^.) :: Exp U32 -> Exp U32 -> Exp U32
+(.^.) = BitXor
+infixl 6 .^.
+
+-- ============================================================================
+-- Integer Operations
+-- ============================================================================
+
+-- | Integer division
+divExp :: Exp a -> Exp a -> Exp a
+divExp = Div
+
+-- | Modulo operation (remainder)
+modExp :: Exp a -> Exp a -> Exp a
+modExp = Mod
+
+-- | Infix operator for division
+(./.) :: Exp a -> Exp a -> Exp a
+(./.) = Div
+infixl 7 ./.
+
+-- | Infix operator for modulo
+(.%) :: Exp a -> Exp a -> Exp a
+(.%) = Mod
+infixl 7 .%
+
+-- ============================================================================
+-- Array and Vector Operations
+-- ============================================================================
 
 -- | Array indexing operator
 (!) :: Exp (Array n a) -> Exp I32 -> Exp a
@@ -536,3 +622,37 @@ buildShaderWithAutoBinding (x, y, z) body =
       , moduleDiagnostics = []
       , moduleBindings = bindings
       }
+
+-- ============================================================================
+-- Math Functions
+-- ============================================================================
+
+sqrt' :: Exp F32 -> Exp F32
+sqrt' = Sqrt
+
+abs' :: Exp a -> Exp a
+abs' = Abs
+
+min' :: Exp a -> Exp a -> Exp a
+min' = Min
+
+max' :: Exp a -> Exp a -> Exp a
+max' = Max
+
+exp' :: Exp F32 -> Exp F32
+exp' = WGSL.AST.Exp
+
+cos' :: Exp a -> Exp a
+cos' = Cos
+
+sin' :: Exp a -> Exp a
+sin' = Sin
+
+pow' :: Exp a -> Exp a -> Exp a
+pow' = Pow
+
+tanh' :: Exp a -> Exp a
+tanh' = Tanh
+
+clamp' :: Exp a -> Exp a -> Exp a -> Exp a
+clamp' = Clamp

@@ -30,6 +30,7 @@ prettyExp expr = case expr of
   Sub a b -> "(" ++ prettyExp a ++ " - " ++ prettyExp b ++ ")"
   Mul a b -> "(" ++ prettyExp a ++ " * " ++ prettyExp b ++ ")"
   Div a b -> "(" ++ prettyExp a ++ " / " ++ prettyExp b ++ ")"
+  Mod a b -> "(" ++ prettyExp a ++ " % " ++ prettyExp b ++ ")"
   Neg a -> "(-" ++ prettyExp a ++ ")"
 
   Eq a b -> "(" ++ prettyExp a ++ " == " ++ prettyExp b ++ ")"
@@ -57,11 +58,26 @@ prettyExp expr = case expr of
   Abs a -> "abs(" ++ prettyExp a ++ ")"
   Min a b -> "min(" ++ prettyExp a ++ ", " ++ prettyExp b ++ ")"
   Max a b -> "max(" ++ prettyExp a ++ ", " ++ prettyExp b ++ ")"
+  WGSL.AST.Exp a -> "exp(" ++ prettyExp a ++ ")"
+  Cos a -> "cos(" ++ prettyExp a ++ ")"
+  Sin a -> "sin(" ++ prettyExp a ++ ")"
+  Pow a b -> "pow(" ++ prettyExp a ++ ", " ++ prettyExp b ++ ")"
+  Tanh a -> "tanh(" ++ prettyExp a ++ ")"
+  Clamp x minVal maxVal -> "clamp(" ++ prettyExp x ++ ", " ++ prettyExp minVal ++ ", " ++ prettyExp maxVal ++ ")"
 
   F32ToI32 a -> "i32(" ++ prettyExp a ++ ")"
   I32ToF32 a -> "f32(" ++ prettyExp a ++ ")"
   U32ToI32 a -> "i32(" ++ prettyExp a ++ ")"
   I32ToU32 a -> "u32(" ++ prettyExp a ++ ")"
+  F16ToF32 a -> "f32(" ++ prettyExp a ++ ")"
+  F32ToF16 a -> "f16(" ++ prettyExp a ++ ")"
+  I32ToF16 a -> "f16(" ++ prettyExp a ++ ")"
+
+  ShiftLeft a b -> "(" ++ prettyExp a ++ " << " ++ prettyExp b ++ ")"
+  ShiftRight a b -> "(" ++ prettyExp a ++ " >> " ++ prettyExp b ++ ")"
+  BitAnd a b -> "(" ++ prettyExp a ++ " & " ++ prettyExp b ++ ")"
+  BitOr a b -> "(" ++ prettyExp a ++ " | " ++ prettyExp b ++ ")"
+  BitXor a b -> "(" ++ prettyExp a ++ " ^ " ++ prettyExp b ++ ")"
 
   SubgroupMatrixLoad ty (Ptr name) offset transpose stride ->
     "subgroupMatrixLoad<" ++ prettyTypeRep ty ++ ">(&" ++ name ++ ", " ++

@@ -41,6 +41,8 @@ module WGSL.Monad
   , globalBuffer
   , readBuffer
   , writeBuffer
+  , readWorkgroup
+  , writeWorkgroup
 
   -- Automatic binding management
   , declareInputBuffer
@@ -80,6 +82,7 @@ module WGSL.Monad
   , newSubgroupMatrixZero
   , initializeSubgroupMatrix
   , loadMatrix
+  , loadMatrixTranspose
   , storeMatrix
   , mma
 
@@ -103,7 +106,7 @@ module WGSL.Monad
   ) where
 
 import WGSL.AST
-import WGSL.CodeGen (prettyTypeRep)
+import WGSL.CodeGen (prettyTypeRep, prettyExp)
 import qualified WGSL.Struct as Struct
 import GHC.Generics (Generic, Rep)
 import Control.Monad.State
@@ -257,7 +260,16 @@ readBuffer ptr idx = return $ PtrIndex ptr idx
 -- | Write to a buffer index
 writeBuffer :: Ptr Storage (Array n a) -> Exp I32 -> Exp a -> ShaderM ()
 writeBuffer (Ptr name) idx value =
-  emitStmt $ Assign (name ++ "[" ++ show idx ++ "]") (SomeExp value)
+  emitStmt $ Assign (name ++ "[" ++ prettyExp idx ++ "]") (SomeExp value)
+
+-- | Index into a workgroup shared memory array
+readWorkgroup :: Ptr Workgroup (Array n a) -> Exp I32 -> ShaderM (Exp a)
+readWorkgroup ptr idx = return $ PtrIndex ptr idx
+
+-- | Write to a workgroup shared memory array index
+writeWorkgroup :: Ptr Workgroup (Array n a) -> Exp I32 -> Exp a -> ShaderM ()
+writeWorkgroup (Ptr name) idx value =
+  emitStmt $ Assign (name ++ "[" ++ prettyExp idx ++ "]") (SomeExp value)
 
 -- ============================================================================
 -- Typed Matrix Views (HOAS-style, type-safe row/column indexing)
@@ -397,6 +409,18 @@ loadMatrix :: Ptr Private a     -- ^ Destination matrix variable
            -> ShaderM ()
 loadMatrix dest src offset stride ty = do
   result <- subgroupMatrixLoad ty src offset (LitBool False) stride
+  assign dest result
+
+-- | Load data from buffer into subgroup matrix WITH TRANSPOSE (high-level wrapper)
+-- Use this when you need to load the transpose of a matrix (e.g., K^T in attention)
+loadMatrixTranspose :: Ptr Private a     -- ^ Destination matrix variable
+                    -> Ptr Storage b      -- ^ Source buffer
+                    -> Exp U32           -- ^ Offset
+                    -> Exp U32           -- ^ Stride
+                    -> TypeRep           -- ^ Matrix type (for code generation)
+                    -> ShaderM ()
+loadMatrixTranspose dest src offset stride ty = do
+  result <- subgroupMatrixLoad ty src offset (LitBool True) stride
   assign dest result
 
 -- | Store subgroup matrix to buffer (high-level wrapper)
