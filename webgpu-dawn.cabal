@@ -58,6 +58,7 @@ library
     WGSL.Profile.Execute
     WGSL.Profile.Trace
     WGSL.Debug
+    WGSL.Analyze
 
   other-modules:
     Graphics.WebGPU.Dawn.Internal
@@ -257,6 +258,46 @@ executable chrome-tracing-demo
     vector >= 0.12 && < 0.14
 
   ghc-options: -Wall
+
+-- Benchmark executables
+executable bench-linear
+  main-is:          LinearBench.hs
+  hs-source-dirs:   benchmarks
+  default-language: Haskell2010
+
+  build-depends:
+    base >= 4.14 && < 5,
+    webgpu-dawn,
+    vector >= 0.12 && < 0.14,
+    clock >= 0.8 && < 0.9
+
+  ghc-options: -Wall -O2 -threaded
+
+executable bench-subgroup-matmul
+  main-is:          SubgroupMatmulBench.hs
+  hs-source-dirs:   benchmarks
+  default-language: Haskell2010
+
+  build-depends:
+    base >= 4.14 && < 5,
+    webgpu-dawn,
+    vector >= 0.12 && < 0.14,
+    clock >= 0.8 && < 0.9
+
+  ghc-options: -Wall -O2 -threaded
+
+executable bench-optimized-matmul
+  main-is:          OptimizedMatmulBench.hs
+  hs-source-dirs:   benchmarks
+  default-language: Haskell2010
+
+  build-depends:
+    base >= 4.14 && < 5,
+    webgpu-dawn,
+    vector >= 0.12 && < 0.14,
+    clock >= 0.8 && < 0.9
+
+  ghc-options: -Wall -O2 -threaded
 
 test-suite webgpu-dawn-tests
   type:             exitcode-stdio-1.0
