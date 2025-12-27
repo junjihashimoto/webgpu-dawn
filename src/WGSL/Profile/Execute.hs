@@ -4,7 +4,7 @@
 Module      : WGSL.Profile.Execute
 Description : Profiling-aware shader execution
 Copyright   : (c) 2025
-License     : BSD3
+License     : MIT
 
 High-level API for executing shaders with GPU profiling enabled.
 Wraps kernel dispatches with timestamp queries for performance measurement.

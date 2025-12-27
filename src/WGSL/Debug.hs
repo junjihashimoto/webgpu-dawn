@@ -4,7 +4,7 @@
 Module      : WGSL.Debug
 Description : GPU printf debugging with ring buffers
 Copyright   : (c) 2025
-License     : BSD3
+License     : MIT
 
 GPU-side printf-style debugging for WebGPU compute kernels.
 Enables writing debug values from GPU threads to a ring buffer,

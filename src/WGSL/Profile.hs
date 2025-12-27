@@ -5,7 +5,7 @@
 Module      : WGSL.Profile
 Description : GPU profiling infrastructure using timestamp queries
 Copyright   : (c) 2025
-License     : BSD3
+License     : MIT
 
 GPU timing support for WebGPU compute kernels using timestamp queries.
 Provides high-precision measurements for identifying performance bottlenecks.

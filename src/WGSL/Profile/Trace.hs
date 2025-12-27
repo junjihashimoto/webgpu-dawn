@@ -4,7 +4,7 @@
 Module      : WGSL.Profile.Trace
 Description : Chrome Tracing format export for GPU profiling
 Copyright   : (c) 2025
-License     : BSD3
+License     : MIT
 
 Export GPU profiling data in Chrome Tracing JSON format for visualization.
 
